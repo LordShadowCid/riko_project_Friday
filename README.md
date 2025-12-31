@@ -84,6 +84,26 @@ uv pip install -r requirements-client.txt
 
 If you are also running the full GPT-SoVITS stack locally, you may need the larger dependency set in `requirements.txt` (it is intentionally heavy).
 
+### Faster-Whisper on GPU (Windows 11)
+
+This project uses Faster-Whisper (CTranslate2). Per the Faster-Whisper documentation, GPU execution requires NVIDIA CUDA 12 + cuDNN 9 (and cuBLAS for CUDA 12).
+
+After installing your NVIDIA driver + CUDA 12 + cuDNN 9, you can validate that CTranslate2 sees your GPUs:
+
+```bash
+python -c "import ctranslate2; print('CUDA devices:', ctranslate2.get_cuda_device_count())"
+```
+
+If this prints `CUDA devices: 0`, Faster-Whisper will run on CPU.
+
+Then set your config to use CUDA:
+
+```yaml
+whisper:
+  device: cuda
+  compute_type: float16
+```
+
 **If you want to use GPU support for Faster whisper** Make sure you also have:
 
 * CUDA & cuDNN installed correctly (for Faster-Whisper GPU support)
