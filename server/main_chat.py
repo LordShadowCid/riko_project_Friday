@@ -8,7 +8,60 @@ import time
 import uuid
 import soundfile as sf
 
-from riko_config import load_config
+from riko_config import load_config, repo_root, resolve_repo_path
+
+
+def _startup_self_check(char_config: dict, input_device, output_device, whisper_cfg: dict):
+    print("\n--- Startup self-check ---")
+
+    # API key sanity
+    api_key = str(char_config.get('OPENAI_API_KEY', '') or '')
+    if not api_key or api_key.strip() in {"sk-YOURAPIKEY", "YOUR_API_KEY"}:
+        print("WARNING: OPENAI_API_KEY looks unset/placeholder in character_config.yaml")
+
+    # Ref audio sanity
+    try:
+        ref_audio = (char_config.get('sovits_ping_config') or {}).get('ref_audio_path')
+        if ref_audio:
+            ref_audio_abs = resolve_repo_path(ref_audio)
+            if not Path(ref_audio_abs).exists():
+                print(f"WARNING: ref_audio_path not found: {ref_audio_abs}")
+    except Exception:
+        pass
+
+    # Audio device visibility
+    try:
+        import sounddevice as sd
+
+        default_in = sd.default.device[0] if isinstance(sd.default.device, (list, tuple)) else None
+        default_out = sd.default.device[1] if isinstance(sd.default.device, (list, tuple)) else None
+        print(f"Audio: input_device={input_device!r} (default={default_in}), output_device={output_device!r} (default={default_out})")
+    except Exception:
+        print(f"Audio: input_device={input_device!r}, output_device={output_device!r}")
+
+    # Whisper settings recap
+    print(
+        "Whisper config: "
+        + f"model={whisper_cfg.get('model', 'base.en')} "
+        + f"device={whisper_cfg.get('device', 'cpu')} "
+        + f"compute_type={whisper_cfg.get('compute_type', 'float32')}"
+    )
+
+    # TTS server reachability (best-effort)
+    try:
+        import requests
+
+        requests.get("http://127.0.0.1:9880/", timeout=1)
+    except Exception:
+        print("NOTE: GPT-SoVITS server not detected at http://127.0.0.1:9880 (start it before chatting)")
+
+    # Repo root recap
+    try:
+        print(f"Repo root: {repo_root()}")
+    except Exception:
+        pass
+
+    print("--- End self-check ---\n")
 
 
 def get_wav_duration(path):
@@ -37,6 +90,8 @@ whisper_model = WhisperModel(whisper_model_name, device=whisper_device, compute_
 audio_cfg = char_config.get('audio', {}) or {}
 input_device = audio_cfg.get('input_device')
 output_device = audio_cfg.get('output_device')
+
+_startup_self_check(char_config, input_device, output_device, whisper_cfg)
 
 while True:
     conversation_recording = Path("audio") / "conversation.wav"
