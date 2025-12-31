@@ -19,33 +19,48 @@ print(' \n ========= Starting Chat... ================ \n')
 whisper_model = WhisperModel("base.en", device="cpu", compute_type="float32")
 
 while True:
-
-    conversation_recording = output_wav_path = Path("audio") / "conversation.wav"
+    conversation_recording = Path("audio") / "conversation.wav"
     conversation_recording.parent.mkdir(parents=True, exist_ok=True)
 
-    user_spoken_text = record_and_transcribe(whisper_model, conversation_recording)
+    output_wav_path = None
 
-    ### pass to LLM and get a LLM output.
+    try:
+        user_spoken_text = record_and_transcribe(whisper_model, conversation_recording)
+        if not user_spoken_text:
+            print("No transcription captured; try again.")
+            continue
 
-    llm_output = llm_response(user_spoken_text)
+        llm_output = llm_response(user_spoken_text)
+        if not llm_output:
+            print("LLM returned empty output; try again.")
+            continue
 
-    tts_read_text = llm_output
+        # Generate a unique filename
+        uid = uuid.uuid4().hex
+        filename = f"output_{uid}.wav"
+        output_wav_path = Path("audio") / filename
+        output_wav_path.parent.mkdir(parents=True, exist_ok=True)
 
-    ### file organization 
+        gen_aud_path = sovits_gen(llm_output, output_wav_path)
+        if gen_aud_path is None:
+            print("TTS generation failed (is GPT-SoVITS running on 127.0.0.1:9880?)")
+            continue
 
-    # 1. Generate a unique filename
-    uid = uuid.uuid4().hex
-    filename = f"output_{uid}.wav"
-    output_wav_path = Path("audio") / filename
-    output_wav_path.parent.mkdir(parents=True, exist_ok=True)
+        play_audio(output_wav_path)
 
-    # generate audio and save it to client/audio 
-    gen_aud_path = sovits_gen(tts_read_text,output_wav_path)
-
-
-    play_audio(output_wav_path)
-    # clean up audio files
-    [fp.unlink() for fp in Path("audio").glob("*.wav") if fp.is_file()]
+    except KeyboardInterrupt:
+        print("\nExiting...")
+        break
+    except Exception as e:
+        print("Error during chat loop:", e)
+    finally:
+        # clean up audio files
+        try:
+            for fp in Path("audio").glob("*.wav"):
+                if fp.is_file():
+                    fp.unlink()
+        except Exception:
+            pass
     # # Example
     # duration = get_wav_duration(output_wav_path)
 

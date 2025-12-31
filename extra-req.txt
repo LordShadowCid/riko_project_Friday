@@ -1,3 +1,6 @@
 faster-whisper
 sounddevice
 openai
+PyYAML
+requests
+soundfile

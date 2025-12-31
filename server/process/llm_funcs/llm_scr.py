@@ -1,19 +1,18 @@
-# OpenAI tool calling with history 
-### Uses a sample function
-import yaml
-import gradio as gr
+"""LLM wrapper (OpenAI Responses API) with local JSON chat history."""
+
 import json
 import os
 from openai import OpenAI
 
-with open('character_config.yaml', 'r') as f:
-    char_config = yaml.safe_load(f)
+from riko_config import load_config
 
-client = OpenAI(api_key=char_config['OPENAI_API_KEY'])
+char_config = load_config()
+client = OpenAI(api_key=char_config.get('OPENAI_API_KEY'))
 
 # Constants
-HISTORY_FILE = char_config['history_file']
-MODEL = char_config['model']
+HISTORY_FILE = char_config.get('history_file', 'chat_history.json')
+MODEL = char_config.get('model', 'gpt-4.1-mini')
+MAX_HISTORY_TURNS = int(char_config.get('max_history_turns', 20))
 SYSTEM_PROMPT =  [
         {
             "role": "system",
@@ -27,15 +26,28 @@ SYSTEM_PROMPT =  [
     ]
 
 # Load/save chat history
+def _trim_history(messages):
+    """Keep the system prompt and the last N user/assistant turns."""
+    if not isinstance(messages, list):
+        return SYSTEM_PROMPT
+
+    system = SYSTEM_PROMPT
+    rest = [m for m in messages if isinstance(m, dict) and m.get('role') != 'system']
+
+    max_messages = max(2, MAX_HISTORY_TURNS * 2)
+    trimmed = rest[-max_messages:]
+    return system + trimmed
+
+
 def load_history():
     if os.path.exists(HISTORY_FILE):
         with open(HISTORY_FILE, "r") as f:
-            return json.load(f)
+            return _trim_history(json.load(f))
     return SYSTEM_PROMPT
 
 def save_history(history):
     with open(HISTORY_FILE, "w") as f:
-        json.dump(history, f, indent=2)
+        json.dump(_trim_history(history), f, indent=2)
 
 
 

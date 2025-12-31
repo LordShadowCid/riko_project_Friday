@@ -22,7 +22,7 @@ This repo includes a `reference/` folder containing snapshots from before the up
 
 ## ⚙️ Configuration
 
-All prompts and parameters are stored in `config.yaml`.
+All prompts and parameters are stored in `character_config.yaml`.
 
 ```yaml
 OPENAI_API_KEY: sk-YOURAPIKEY
@@ -53,8 +53,10 @@ You can define personalities by modiying the config file.
 ```bash
 pip install uv 
 uv pip install -r extra-req.txt
-uv pip install -r requirements.txt
+uv pip install -r requirements-client.txt
 ```
+
+If you are also running the full GPT-SoVITS stack locally, you may need the larger dependency set in `requirements.txt` (it is intentionally heavy).
 
 **If you want to use GPU support for Faster whisper** Make sure you also have:
 
@@ -70,7 +72,7 @@ uv pip install -r requirements.txt
 
 
 ```bash
-python main_chat.py
+python server/main_chat.py
 ```
 
 The flow:
