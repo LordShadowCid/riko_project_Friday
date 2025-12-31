@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  gpt-sovits:
+    image: breakstring/gpt-sovits:latest
+    container_name: riko-gpt-sovits
+    ports:
+      - "9880:9880"  # TTS API port
+      - "9871:9871"  # WebUI port (optional)
+    environment:
+      - is_half=true  # Enable fp16 to reduce memory usage
+    volumes:
+      - ./character_files:/workspace/character_files:ro  # Mount audio files
+      - ./models:/workspace/models  # Mount models directory
+      - gpt-sovits-data:/workspace/GPT-SoVITS/logs  # Persist logs
+    shm_size: 16g  # Increase shared memory for Windows Docker Desktop
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9880/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  gpt-sovits-data:
+    driver: local
