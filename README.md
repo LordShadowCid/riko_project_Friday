@@ -96,6 +96,22 @@ python -c "import ctranslate2; print('CUDA devices:', ctranslate2.get_cuda_devic
 
 If this prints `CUDA devices: 0`, Faster-Whisper will run on CPU.
 
+#### Troubleshooting (when `CUDA devices: 0`)
+
+- Confirm your NVIDIA driver is installed and `nvidia-smi` shows your GPU(s).
+- Confirm you installed CUDA 12 + cuDNN 9 (older CUDA/cuDNN combos typically won’t work with the newest CTranslate2 GPU wheels).
+- If you have multiple GPUs, you can force which one Faster-Whisper sees via `whisper.cuda_visible_devices` in `character_config.yaml`.
+
+#### CPU fallback
+
+If you just want it to work (slower, but simplest), set:
+
+```yaml
+whisper:
+  device: cpu
+  compute_type: int8
+```
+
 Then set your config to use CUDA:
 
 ```yaml

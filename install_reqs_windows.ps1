@@ -17,4 +17,7 @@ uv pip install -r requirements-client.txt
 Write-Host "Checking CTranslate2 CUDA visibility..."
 python -c "import ctranslate2; print('CUDA devices:', ctranslate2.get_cuda_device_count())"
 
+Write-Host "Sanity-checking faster_whisper import..."
+python -c "import faster_whisper; print('faster_whisper import: OK')"
+
 Write-Host "Done. If CUDA devices is > 0, set whisper.device=cuda in character_config.yaml." 
