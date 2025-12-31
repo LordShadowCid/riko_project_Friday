@@ -3,6 +3,14 @@
 Project Riko is a anime focused LLM project by Just Rayen. She listens, and remembers your conversations. It combines OpenAI’s GPT, GPT-SoVITS voice synthesis, and Faster-Whisper ASR into a fully configurable conversational pipeline.
 
 **tested with python 3.10 Windows >10 and Linux Ubuntu**
+
+## 🧾 Reference snapshots
+
+This repo includes a `reference/` folder containing snapshots from before the upstream re-sync (kept for comparison and for reusing old code if needed):
+
+- `reference/backup_pre_upstream_reset_2025-12-31/src/`: snapshot of the pre-reset branch
+- `reference/stash_pre_upstream_reset_2025-12-31/`: snapshot of the pre-reset working tree (includes uncommitted changes)
+
 ## ✨ Features
 
 - 💬 **LLM-based dialogue** using OpenAI API (configurable system prompts)
