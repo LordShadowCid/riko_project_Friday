@@ -3,7 +3,28 @@ import sounddevice as sd
 import soundfile as sf
 from faster_whisper import WhisperModel
 
-def record_and_transcribe(model, output_file="recording.wav", samplerate=44100):
+
+def _resolve_device(device):
+    """Resolve a sounddevice input/output device selector.
+
+    - None: use default
+    - int: treated as device index
+    - str: case-insensitive substring match against device names
+    """
+    if device is None or device == "":
+        return None
+    if isinstance(device, int):
+        return device
+    if isinstance(device, str):
+        devices = sd.query_devices()
+        needle = device.lower().strip()
+        for idx, d in enumerate(devices):
+            name = str(d.get("name", "")).lower()
+            if needle and needle in name:
+                return idx
+    return None
+
+def record_and_transcribe(model, output_file="recording.wav", samplerate=44100, input_device=None):
     """
     Simple push-to-talk recorder: record -> save -> transcribe -> return text
     """
@@ -17,8 +38,16 @@ def record_and_transcribe(model, output_file="recording.wav", samplerate=44100):
     
     print("🔴 Recording... Press ENTER to stop")
     
+    device = _resolve_device(input_device)
+
     # Record audio directly
-    recording = sd.rec(int(60 * samplerate), samplerate=samplerate, channels=1, dtype='float64')
+    recording = sd.rec(
+        int(60 * samplerate),
+        samplerate=samplerate,
+        channels=1,
+        dtype='float32',
+        device=device,
+    )
     input()  # Wait for stop
     sd.stop()
     

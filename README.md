@@ -45,6 +45,32 @@ sovits_ping_config:
 
 You can define personalities by modiying the config file.
 
+### Windows 11 notes (audio devices + GPU)
+
+You can optionally pick which microphone/speaker devices to use (helpful if you have multiple audio devices):
+
+```yaml
+audio:
+  input_device:  # e.g. 1  OR  "Realtek"  (substring match)
+  output_device: # e.g. 5  OR  "Speakers" (substring match)
+```
+
+To see your available device names/indexes:
+
+```bash
+python -c "import sounddevice as sd; print(sd.query_devices())"
+```
+
+Whisper can run on CPU or GPU. For example, on CUDA:
+
+```yaml
+whisper:
+  model: small.en
+  device: cuda
+  compute_type: float16
+  # cuda_visible_devices: "0"  # optionally pick GPU 0 vs 1
+```
+
 
 ## 🛠️ Setup
 

@@ -9,9 +9,31 @@ from riko_config import load_config, resolve_repo_path
 char_config = load_config()
 
 
-def play_audio(path):
+def _resolve_device(device):
+    """Resolve a sounddevice input/output device selector.
+
+    - None: use default
+    - int: treated as device index
+    - str: case-insensitive substring match against device names
+    """
+    if device is None or device == "":
+        return None
+    if isinstance(device, int):
+        return device
+    if isinstance(device, str):
+        devices = sd.query_devices()
+        needle = device.lower().strip()
+        for idx, d in enumerate(devices):
+            name = str(d.get("name", "")).lower()
+            if needle and needle in name:
+                return idx
+    return None
+
+
+def play_audio(path, output_device=None):
     data, samplerate = sf.read(path)
-    sd.play(data, samplerate)
+    device = _resolve_device(output_device)
+    sd.play(data, samplerate, device=device)
     sd.wait()  # Wait until playback is finished
 
 def sovits_gen(in_text, output_wav_pth = "output.wav"):
