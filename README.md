@@ -112,6 +112,24 @@ whisper:
   compute_type: int8
 ```
 
+### Quick verification (Windows)
+
+Use these quick checks to confirm your local install is healthy:
+
+```bash
+# List audio devices (helps pick audio.input_device/audio.output_device)
+python -c "import sounddevice as sd; print(sd.query_devices())"
+
+# Confirm Faster-Whisper is installed
+python -c "import faster_whisper; print('faster_whisper import: OK')"
+
+# Confirm your OpenAI API key is present (required for LLM calls)
+python -c "import os; print('OPENAI_API_KEY set:', bool(os.getenv('OPENAI_API_KEY')))"
+
+# Confirm GPT-SoVITS server is reachable (required for TTS)
+python -c "import requests; print('TTS server HTTP:', requests.get('http://127.0.0.1:9880').status_code)"
+```
+
 Then set your config to use CUDA:
 
 ```yaml
