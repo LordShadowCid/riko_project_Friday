@@ -77,6 +77,12 @@ async def index_handler(request):
     return web.FileResponse(html_path)
 
 
+async def companion_handler(request):
+    """Serve the desktop companion HTML page (transparent, minimal UI)"""
+    html_path = Path(__file__).parent / "companion.html"
+    return web.FileResponse(html_path)
+
+
 def create_app(repo_root: Path = None):
     """Create the aiohttp application"""
     if repo_root is None:
@@ -86,6 +92,7 @@ def create_app(repo_root: Path = None):
     
     # Routes
     app.router.add_get('/', index_handler)
+    app.router.add_get('/companion', companion_handler)
     app.router.add_get('/ws', websocket_handler)
     
     # Static file routes for models
