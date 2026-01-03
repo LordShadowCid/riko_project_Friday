@@ -24,7 +24,8 @@ response_cache:
 
 history_file: chat_history.json
 model: "mannix/llama3.1-8b-abliterated"
-max_history_turns: 15
+# Reduced from 15 to 8 for faster LLM response (smaller context window)
+max_history_turns: 8
 
 # Windows/local runtime settings
 audio:

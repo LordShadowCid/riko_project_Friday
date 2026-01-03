@@ -117,7 +117,8 @@ def create_embedding_from_file(audio_path: str) -> np.ndarray:
 def identify_speaker(
     audio: np.ndarray,
     sample_rate: int = 16000,
-    threshold: float = 0.75
+    threshold: float = 0.75,
+    min_duration: float = 1.5
 ) -> Tuple[Optional[str], float]:
     """
     Identify which known speaker the audio belongs to.
@@ -126,11 +127,18 @@ def identify_speaker(
         audio: Audio samples as numpy array
         sample_rate: Sample rate of the audio
         threshold: Minimum similarity score to consider a match (0-1)
+        min_duration: Minimum audio duration in seconds for reliable ID
     
     Returns:
         Tuple of (speaker_name or None, similarity_score)
         Returns (None, 0.0) if no speaker matches above threshold
     """
+    # Check minimum audio length for reliable identification
+    duration = len(audio) / sample_rate
+    if duration < min_duration:
+        print(f"[Speaker ID] Audio too short ({duration:.1f}s < {min_duration}s), skipping")
+        return None, 0.0
+    
     profiles = load_speaker_profiles()
     
     if not profiles:

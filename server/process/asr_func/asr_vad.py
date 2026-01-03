@@ -285,7 +285,12 @@ def record_vad_and_transcribe(
     
     print("🎯 Transcribing...")
     
-    segments, _ = model.transcribe(output_file)
+    # Use Silero VAD filter to skip silence and improve transcription speed
+    segments, _ = model.transcribe(
+        output_file,
+        vad_filter=True,
+        vad_parameters=dict(min_silence_duration_ms=500)
+    )
     transcription = " ".join([segment.text for segment in segments]).strip()
     
     print(f"Transcription: {transcription}")

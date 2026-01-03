@@ -283,6 +283,13 @@ use_speaker_id = speaker_id_cfg.get('enabled', True)
 speaker_id_threshold = speaker_id_cfg.get('threshold', 0.75)
 current_speaker = None  # Track who is currently speaking
 
+# Pre-warm models for faster first request
+if use_speaker_id:
+    print("[Warmup] Loading speaker encoder and profiles...")
+    from server.process.asr_func.speaker_id import _get_encoder, load_speaker_profiles
+    _get_encoder()  # Force-load the voice encoder now
+    load_speaker_profiles()  # Load all speaker profiles into memory
+
 _startup_self_check(char_config, input_device, output_device, whisper_cfg)
 
 if use_vad:
