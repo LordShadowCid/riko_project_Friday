@@ -1,5 +1,5 @@
 # Minimal runtime requirements for the local chat client (Windows 11 friendly)
-openai
+ollama
 PyYAML
 requests
 faster-whisper

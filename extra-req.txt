@@ -1,6 +1,6 @@
 faster-whisper
 sounddevice
-openai
+ollama
 PyYAML
 requests
 soundfile

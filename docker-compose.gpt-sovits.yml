@@ -1,0 +1,25 @@
+version: "3.8"
+
+services:
+  gpt-sovits:
+    image: xxxxrt666/gpt-sovits:latest-cu126-lite
+    container_name: gpt-sovits
+    ports:
+      - "9880:9880"
+    command: bash -lc "cd /workspace/GPT-SoVITS && PYTHONUNBUFFERED=1 python -u api_v2.py -a 0.0.0.0 -p 9880 > /tmp/gpt-sovits.log 2>&1"
+    environment:
+      - is_half=true
+    shm_size: "16g"
+    # Docker Desktop (WSL2) + NVIDIA Container Toolkit required for GPU.
+    gpus: all
+    volumes:
+      # You must clone the official GPT-SoVITS repo here (script below can do it).
+      - ./third_party/GPT-SoVITS:/workspace/GPT-SoVITS
+
+      # Your reference audio for voice cloning (used by this Anabeth project).
+      - ./character_files:/data/ref:ro
+
+      # Pretrained weights (and optional extra models) expected at /workspace/models/* inside the container.
+      - ./gpt_sovits_models:/workspace/models
+
+    restart: unless-stopped

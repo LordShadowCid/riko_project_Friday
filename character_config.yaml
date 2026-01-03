@@ -1,14 +1,18 @@
-OPENAI_API_KEY: sk-YOURAPIKEY
+# Ollama configuration (local LLM)
+ollama:
+  host: http://localhost:11434
+  model: qwen3:14b
+
 history_file: chat_history.json
-model: "gpt-4.1-mini"
+model: "qwen3:14b"
 max_history_turns: 20
 
 # Windows/local runtime settings
 audio:
   # Set to an integer device index OR a substring of the device name.
   # Leave blank/null to use the system default.
-  input_device:
-  output_device:
+  input_device: BCC950
+  output_device: BCC950
 
 whisper:
   # Common choices: base.en, small.en, medium.en, large-v3
@@ -16,9 +20,9 @@ whisper:
   # cpu or cuda
   device: cpu
   # float32 (cpu), float16/int8_float16 (cuda), int8 (cpu/cuda)
-  compute_type: float32
+  compute_type: int8
   # Optional: restrict visible GPUs (example: "0" or "1" or "0,1")
-  cuda_visible_devices:
+  # cuda_visible_devices: "1"
 presets:
   default:
     system_prompt: |
@@ -29,6 +33,8 @@ presets:
 sovits_ping_config:
   text_lang: en
   prompt_lang : en
-  ref_audio_path : character_files/main_sample.wav
+  # For Docker GPT-SoVITS, this should be a Linux path inside the container.
+  # The provided docker-compose mounts ./character_files to /data/ref
+  ref_audio_path : /data/ref/main_sample.wav
   prompt_text : This is a sample voice for you to just get started with because it sounds kind of cute but just make sure this doesn't have long silences.
   

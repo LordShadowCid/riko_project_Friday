@@ -1,4 +1,4 @@
-from process.asr_func.asr_push_to_talk import record_and_transcribe
+from process.asr_func.asr_push_to_talk import record_and_transcribe, transcribe_file
 from process.llm_funcs.llm_scr import llm_response
 from process.tts_func.sovits_ping import sovits_gen, play_audio
 from pathlib import Path
@@ -11,21 +11,68 @@ import soundfile as sf
 from riko_config import load_config, repo_root, resolve_repo_path
 
 
+def _prepare_whisper_model_source(model_name: str) -> str:
+    """Ensure Faster-Whisper model is loadable on Windows without symlink privileges.
+
+    Hugging Face cache normally uses symlinks. On Windows without Developer Mode/admin,
+    symlink creation can fail (WinError 1314). To avoid that, download into a local
+    folder using file copies and load the model from that folder.
+    """
+    try:
+        # If a local path was provided, just use it.
+        p = Path(model_name)
+        if p.exists():
+            return str(p)
+    except Exception:
+        pass
+
+    # If user provided a repo_id (e.g. "Systran/faster-whisper-base.en"), let
+    # faster-whisper handle it.
+    if "/" in str(model_name) or "\\" in str(model_name):
+        return model_name
+
+    # Windows-only workaround.
+    if os.name != "nt":
+        return model_name
+
+    repo_id = f"Systran/faster-whisper-{model_name}"
+    local_dir = repo_root() / "models" / "faster_whisper" / str(model_name)
+    try:
+        local_dir.mkdir(parents=True, exist_ok=True)
+        os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+        from huggingface_hub import snapshot_download
+
+        snapshot_download(
+            repo_id=repo_id,
+            local_dir=str(local_dir),
+            local_dir_use_symlinks=False,
+        )
+        return str(local_dir)
+    except Exception as e:
+        print(f"NOTE: Whisper model pre-download failed ({repo_id}): {e}")
+        return model_name
+
+
 def _startup_self_check(char_config: dict, input_device, output_device, whisper_cfg: dict):
     print("\n--- Startup self-check ---")
 
     # API key sanity
-    api_key = str(char_config.get('OPENAI_API_KEY', '') or '')
+    api_key = str(os.environ.get('OPENAI_API_KEY') or char_config.get('OPENAI_API_KEY', '') or '')
     if not api_key or api_key.strip() in {"sk-YOURAPIKEY", "YOUR_API_KEY"}:
-        print("WARNING: OPENAI_API_KEY looks unset/placeholder in character_config.yaml")
+        print("WARNING: OPENAI_API_KEY is not set (set env var OPENAI_API_KEY or set it in character_config.yaml)")
 
     # Ref audio sanity
     try:
         ref_audio = (char_config.get('sovits_ping_config') or {}).get('ref_audio_path')
         if ref_audio:
-            ref_audio_abs = resolve_repo_path(ref_audio)
-            if not Path(ref_audio_abs).exists():
-                print(f"WARNING: ref_audio_path not found: {ref_audio_abs}")
+            # If user set a container/Linux path (e.g. /data/ref/main_sample.wav),
+            # skip local filesystem existence checks.
+            if isinstance(ref_audio, str) and ref_audio.strip().startswith("/"):
+                print(f"TTS: ref_audio_path is a container path: {ref_audio}")
+            else:
+                ref_audio_abs = resolve_repo_path(ref_audio)
+                if not Path(ref_audio_abs).exists():
+                    print(f"WARNING: ref_audio_path not found: {ref_audio_abs}")
     except Exception:
         pass
 
@@ -84,8 +131,28 @@ whisper_model_name = whisper_cfg.get('model', 'base.en')
 whisper_device = whisper_cfg.get('device', 'cpu')
 whisper_compute_type = whisper_cfg.get('compute_type', 'float32')
 
+whisper_model_source = _prepare_whisper_model_source(str(whisper_model_name))
 print(f"Whisper: model={whisper_model_name} device={whisper_device} compute_type={whisper_compute_type}")
-whisper_model = WhisperModel(whisper_model_name, device=whisper_device, compute_type=whisper_compute_type)
+if whisper_model_source != whisper_model_name:
+    print(f"Whisper: using local model folder: {whisper_model_source}")
+try:
+    whisper_model = WhisperModel(whisper_model_source, device=whisper_device, compute_type=whisper_compute_type)
+except Exception as e:
+    msg = str(e)
+    cuda_requested = str(whisper_device).lower() == "cuda"
+    maybe_cudnn = ("cudnn" in msg.lower()) or ("cublas" in msg.lower()) or ("Could not locate" in msg)
+    allow_fallback = bool(whisper_cfg.get("fallback_to_cpu", True))
+
+    if cuda_requested and maybe_cudnn and allow_fallback:
+        print("\nWARNING: Whisper CUDA init failed; falling back to CPU.")
+        print("This usually means CUDA 12 is installed but cuDNN 9 DLLs are missing from PATH.")
+        print("Fix: install cuDNN 9 for CUDA 12 and ensure the cuDNN 'bin' folder is on PATH (contains cudnn_ops64_9.dll).")
+        print(f"Original error: {e}\n")
+        whisper_device = "cpu"
+        whisper_compute_type = "int8"
+        whisper_model = WhisperModel(whisper_model_source, device=whisper_device, compute_type=whisper_compute_type)
+    else:
+        raise
 
 audio_cfg = char_config.get('audio', {}) or {}
 input_device = audio_cfg.get('input_device')
@@ -100,11 +167,31 @@ while True:
     output_wav_path = None
 
     try:
-        user_spoken_text = record_and_transcribe(
-            whisper_model,
-            conversation_recording,
-            input_device=input_device,
-        )
+        try:
+            user_spoken_text = record_and_transcribe(
+                whisper_model,
+                conversation_recording,
+                input_device=input_device,
+            )
+        except Exception as e:
+            msg = str(e)
+            cudnn_like = ("cudnn" in msg.lower()) or ("cudnn_ops64_9.dll" in msg) or ("cudnnCreateTensorDescriptor" in msg)
+            cuda_requested = str(whisper_cfg.get('device', '')).lower() == 'cuda'
+            allow_fallback = bool(whisper_cfg.get('fallback_to_cpu', True))
+
+            if cudnn_like and cuda_requested and allow_fallback:
+                print("\nWARNING: Whisper GPU transcription failed (cuDNN missing). Falling back to CPU for ASR.")
+                print("Fix: install cuDNN 9 for CUDA 12 and add its 'bin' folder to PATH (contains cudnn_ops64_9.dll).")
+                print(f"Original error: {e}\n")
+
+                whisper_model = WhisperModel(whisper_model_source, device='cpu', compute_type='int8')
+                if Path(conversation_recording).exists():
+                    user_spoken_text = transcribe_file(whisper_model, str(conversation_recording))
+                    print(f"Transcription: {user_spoken_text}")
+                else:
+                    raise
+            else:
+                raise
         if not user_spoken_text:
             print("No transcription captured; try again.")
             continue
@@ -113,6 +200,8 @@ while True:
         if not llm_output:
             print("LLM returned empty output; try again.")
             continue
+
+        print(f"Riko: {llm_output}")
 
         # Generate a unique filename
         uid = uuid.uuid4().hex

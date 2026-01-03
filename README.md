@@ -148,6 +148,29 @@ whisper:
 
 ### 1. Launch the GPT-SoVITS API 
 
+This repo calls a GPT-SoVITS WebAPI at `http://127.0.0.1:9880/tts`.
+
+**Docker (recommended on Windows):**
+
+1. Ensure Docker Desktop is installed and GPU support is enabled (WSL2 + NVIDIA Container Toolkit).
+2. From the repo root, run:
+
+```powershell
+./start-gpt-sovits-docker.ps1
+```
+
+This will clone the official GPT-SoVITS repo into `third_party/GPT-SoVITS/` (if missing) and start a container exposing port `9880`.
+
+Quick reachability check:
+
+```bash
+python -c "import requests; print('TTS server HTTP:', requests.get('http://127.0.0.1:9880/tts', timeout=2).status_code)"
+```
+
+Notes:
+- The container must be able to read the reference audio. This repo mounts `./character_files` into the container at `/data/ref`, and `character_config.yaml` uses `/data/ref/main_sample.wav`.
+- GPT-SoVITS may require downloading its pretrained models inside `third_party/GPT-SoVITS/` (see the GPT-SoVITS docs if `/tts` returns a model/config error).
+
 ### 2. Run the main script:
 
 
