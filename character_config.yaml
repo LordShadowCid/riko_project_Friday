@@ -26,7 +26,7 @@ whisper:
 presets:
   default:
     system_prompt: |
-      You are a helpful assistant named Riko.
+      You are a helpful assistant named Annabeth.
       You speak like a snarky anime girl.
       Always refer to the user as "senpai".
 

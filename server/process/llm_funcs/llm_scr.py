@@ -11,7 +11,7 @@ import os
 from openai import OpenAI
 import requests
 
-from server.riko_config import load_config
+from server.annabeth_config import load_config
 
 
 char_config = load_config()
@@ -156,7 +156,7 @@ def save_history(history):
 
 
 
-def get_riko_response_no_tool(messages):
+def get_annabeth_response(messages):
     api_key = _resolve_openai_api_key()
     if api_key:
         client = _get_openai_client()
@@ -225,19 +225,19 @@ def llm_response(user_input):
     })
 
 
-    riko_test_response = get_riko_response_no_tool(messages)
+    annabeth_response = get_annabeth_response(messages)
 
 
     # just append assistant message to regular response. 
     messages.append({
     "role": "assistant",
     "content": [
-        {"type": "output_text", "text": riko_test_response.output_text}
+        {"type": "output_text", "text": annabeth_response.output_text}
     ]
     })
 
     save_history(messages)
-    return riko_test_response.output_text
+    return annabeth_response.output_text
 
 
 if __name__ == "__main__":

@@ -31,11 +31,11 @@ def load_config(config_path: Optional[str | os.PathLike[str]] = None) -> Dict[st
 
     Resolution order:
     1) explicit arg
-    2) env var RIKO_CONFIG_PATH
+    2) env var ANNABETH_CONFIG_PATH
     3) repo-root character_config.yaml
     """
     if config_path is None:
-        config_path = os.environ.get("RIKO_CONFIG_PATH")
+        config_path = os.environ.get("ANNABETH_CONFIG_PATH")
 
     path = Path(config_path) if config_path else _DEFAULT_CONFIG_PATH
     if not path.is_absolute():
@@ -43,7 +43,7 @@ def load_config(config_path: Optional[str | os.PathLike[str]] = None) -> Dict[st
 
     if not path.exists():
         raise FileNotFoundError(
-            f"Config not found at '{path}'. Set RIKO_CONFIG_PATH or create character_config.yaml in repo root."
+            f"Config not found at '{path}'. Set ANNABETH_CONFIG_PATH or create character_config.yaml in repo root."
         )
 
     with path.open("r", encoding="utf-8") as f:

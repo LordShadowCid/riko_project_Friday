@@ -1,6 +1,6 @@
-# Project Riko
+# Project Annabeth
 
-Project Riko is a anime focused LLM project by Just Rayen. She listens, and remembers your conversations. It combines OpenAI’s GPT, GPT-SoVITS voice synthesis, and Faster-Whisper ASR into a fully configurable conversational pipeline.
+Project Annabeth is a anime focused LLM project (forked from Project Riko by Just Rayen). She listens, and remembers your conversations. It combines Ollama/OpenAI LLM, GPT-SoVITS voice synthesis, Faster-Whisper ASR, and a 3D VRM avatar into a fully configurable conversational pipeline.
 
 **tested with python 3.10 Windows >10 and Linux Ubuntu**
 

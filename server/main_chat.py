@@ -10,7 +10,7 @@ import threading
 import uuid
 import soundfile as sf
 
-from server.riko_config import load_config, repo_root, resolve_repo_path
+from server.annabeth_config import load_config, repo_root, resolve_repo_path
 
 # Avatar server integration
 avatar_api = None
@@ -259,7 +259,7 @@ while True:
             print("LLM returned empty output; try again.")
             continue
 
-        print(f"Riko: {llm_output}")
+        print(f"Annabeth: {llm_output}")
 
         # Generate a unique filename
         uid = uuid.uuid4().hex
