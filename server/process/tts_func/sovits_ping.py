@@ -4,7 +4,7 @@ import time
 import soundfile as sf 
 import sounddevice as sd
 
-from riko_config import load_config, resolve_repo_path
+from server.riko_config import load_config, resolve_repo_path
 
 char_config = load_config()
 

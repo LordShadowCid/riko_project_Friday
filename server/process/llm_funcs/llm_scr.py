@@ -11,7 +11,7 @@ import os
 from openai import OpenAI
 import requests
 
-from riko_config import load_config
+from server.riko_config import load_config
 
 
 char_config = load_config()

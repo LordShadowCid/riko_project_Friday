@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Riko Avatar</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            overflow: hidden;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        #canvas-container { 
+            width: 100vw; 
+            height: 100vh; 
+        }
+        #status {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            color: #fff;
+            background: rgba(0,0,0,0.5);
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        #status.connected { background: rgba(0,128,0,0.5); }
+        #status.speaking { background: rgba(128,0,128,0.7); animation: pulse 0.5s infinite; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.7; } }
+        #subtitle {
+            position: fixed;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #fff;
+            background: rgba(0,0,0,0.7);
+            padding: 15px 30px;
+            border-radius: 12px;
+            font-size: 18px;
+            max-width: 80%;
+            text-align: center;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        #subtitle.visible { opacity: 1; }
+        #emotion-indicator {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            color: #fff;
+            background: rgba(0,0,0,0.5);
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        #animation-controls {
+            position: fixed;
+            bottom: 120px;
+            left: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .anim-btn {
+            background: rgba(80, 80, 120, 0.8);
+            color: #fff;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+        .anim-btn:hover {
+            background: rgba(100, 100, 160, 0.9);
+            transform: scale(1.05);
+        }
+        .anim-btn.playing {
+            background: rgba(100, 180, 100, 0.9);
+        }
+        #anim-status {
+            color: #aaa;
+            font-size: 12px;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    <div id="status">🔌 Connecting...</div>
+    <div id="emotion-indicator">😊 Neutral</div>
+    <div id="subtitle"></div>
+    <div id="animation-controls">
+        <div id="anim-status">🎬 No animations loaded</div>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/",
+            "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.1.0/lib/three-vrm.module.min.js"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
+        
+        // Try to load VRMA support (optional)
+        let VRMAnimationLoaderPlugin = null;
+        let createVRMAnimationClip = null;
+        try {
+            const vrmAnimModule = await import('https://cdn.jsdelivr.net/npm/@pixiv/three-vrm-animation@2.1.0/lib/three-vrm-animation.module.min.js');
+            VRMAnimationLoaderPlugin = vrmAnimModule.VRMAnimationLoaderPlugin;
+            createVRMAnimationClip = vrmAnimModule.createVRMAnimationClip;
+            console.log('VRMA animation support loaded');
+        } catch (e) {
+            console.warn('VRMA animation support not available:', e);
+        }
+
+        const statusEl = document.getElementById('status');
+        const subtitleEl = document.getElementById('subtitle');
+        const emotionEl = document.getElementById('emotion-indicator');
+
+        // Scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 1.3, 2.5);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        directionalLight.position.set(1, 2, 1);
+        scene.add(directionalLight);
+
+        const backLight = new THREE.DirectionalLight(0x8888ff, 0.4);
+        backLight.position.set(-1, 1, -1);
+        scene.add(backLight);
+
+        // Controls
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 1.2, 0);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.update();
+
+        // LookAt target (follows mouse)
+        const lookAtTarget = new THREE.Object3D();
+        scene.add(lookAtTarget);
+        lookAtTarget.position.set(0, 1.4, 2);
+
+        let vrm = null;
+        let isSpeaking = false;
+        let speakStartTime = 0;
+        let currentEmotion = 'neutral';
+        let targetEmotion = 'neutral';
+        let emotionBlend = 0;
+        
+        // Blink state
+        let blinkTimer = 0;
+        let isBlinking = false;
+        let nextBlinkTime = 2 + Math.random() * 3;
+        
+        // Idle animation state
+        let idleTime = 0;
+        let headIdlePhase = Math.random() * Math.PI * 2;
+        let bodyIdlePhase = Math.random() * Math.PI * 2;
+        
+        // Lip sync state
+        const vowels = ['aa', 'ih', 'ou', 'ee', 'oh'];
+        let currentVowelIndex = 0;
+        let vowelTimer = 0;
+
+        // Animation system
+        let mixer = null;
+        let currentAction = null;
+        const loadedAnimations = new Map();
+        let isPlayingVRMA = false;
+        
+        // Load VRM with animation support
+        const loader = new GLTFLoader();
+        loader.register((parser) => new VRMLoaderPlugin(parser));
+        if (VRMAnimationLoaderPlugin) {
+            loader.register((parser) => new VRMAnimationLoaderPlugin(parser));
+        }
+
+        const vrmUrl = 'http://localhost:8765/models/vrm/claire_avatar.vrm';
+        
+        console.log('Loading VRM from:', vrmUrl);
+        statusEl.textContent = '📦 Loading VRM model...';
+        
+        loader.load(
+            vrmUrl,
+            (gltf) => {
+                console.log('VRM GLTF loaded:', gltf);
+                vrm = gltf.userData.vrm;
+                if (!vrm) {
+                    console.error('No VRM data in loaded file!');
+                    statusEl.textContent = '❌ Invalid VRM file';
+                    return;
+                }
+                VRMUtils.removeUnnecessaryVertices(gltf.scene);
+                VRMUtils.removeUnnecessaryJoints(gltf.scene);
+                scene.add(gltf.scene);
+                
+                // Setup lookAt to follow target
+                if (vrm.lookAt) {
+                    vrm.lookAt.target = lookAtTarget;
+                    vrm.lookAt.autoUpdate = true;
+                }
+                
+                // Set initial idle pose (arms down from T-pose)
+                setupIdlePose();
+                
+                // Initialize animation mixer
+                mixer = new THREE.AnimationMixer(gltf.scene);
+                
+                console.log('VRM loaded successfully');
+                console.log('Available expressions:', vrm.expressionManager?.expressions?.map(e => e.expressionName));
+                statusEl.textContent = '✅ Model loaded, connecting...';
+                
+                // Load available VRMA animations
+                loadVRMAAnimations();
+            },
+            (progress) => {
+                const pct = Math.round((progress.loaded / progress.total) * 100);
+                statusEl.textContent = `📦 Loading model... ${pct}%`;
+            },
+            (error) => {
+                console.error('VRM load error:', error);
+                statusEl.textContent = '❌ Failed to load VRM - start the server first';
+            }
+        );
+
+        function setupIdlePose() {
+            if (!vrm || !vrm.humanoid) return;
+            
+            // Get arm bones and rotate them down from T-pose
+            const leftUpperArm = vrm.humanoid.getNormalizedBoneNode('leftUpperArm');
+            const rightUpperArm = vrm.humanoid.getNormalizedBoneNode('rightUpperArm');
+            const leftLowerArm = vrm.humanoid.getNormalizedBoneNode('leftLowerArm');
+            const rightLowerArm = vrm.humanoid.getNormalizedBoneNode('rightLowerArm');
+            
+            if (leftUpperArm) {
+                leftUpperArm.rotation.z = 1.1; // Rotate down ~63 degrees
+                leftUpperArm.rotation.x = 0.1; // Slight forward
+            }
+            if (rightUpperArm) {
+                rightUpperArm.rotation.z = -1.1; // Rotate down ~63 degrees  
+                rightUpperArm.rotation.x = 0.1; // Slight forward
+            }
+            if (leftLowerArm) {
+                leftLowerArm.rotation.y = -0.3; // Slight bend
+            }
+            if (rightLowerArm) {
+                rightLowerArm.rotation.y = 0.3; // Slight bend
+            }
+        }
+
+        // VRMA Animation System
+        const animStatusEl = document.getElementById('anim-status');
+        const animControlsEl = document.getElementById('animation-controls');
+        
+        async function loadVRMAAnimations() {
+            if (!createVRMAnimationClip) {
+                animStatusEl.textContent = '⚠️ VRMA not supported';
+                console.warn('VRMA animation support not loaded');
+                return;
+            }
+            
+            // List of VRMA files to try loading from the animations folder
+            const animationFiles = [
+                // VRoid Project Official Pack
+                { name: 'Greeting', file: 'VRMA_02.vrma', icon: '👋' },
+                { name: 'Peace Sign', file: 'VRMA_03.vrma', icon: '✌️' },
+                { name: 'Show Body', file: 'VRMA_01.vrma', icon: '🧍' },
+                { name: 'Spin', file: 'VRMA_05.vrma', icon: '🔄' },
+                { name: 'Model Pose', file: 'VRMA_06.vrma', icon: '📸' },
+                { name: 'Squat', file: 'VRMA_07.vrma', icon: '🏋️' },
+                // fumi2kick Pack
+                { name: 'Hello', file: '004_hello_1.vrma', icon: '🙋' },
+                { name: 'Pose', file: '001_motion_pose.vrma', icon: '💃' },
+                { name: 'Encourage', file: '007_gekirei.vrma', icon: '💪' },
+            ];
+            
+            let loadedCount = 0;
+            
+            for (const anim of animationFiles) {
+                try {
+                    const url = `http://localhost:8765/animations/${anim.file}`;
+                    const response = await fetch(url, { method: 'HEAD' });
+                    
+                    if (response.ok) {
+                        // File exists, load it
+                        await loadVRMAFile(url, anim.name, anim.icon);
+                        loadedCount++;
+                    }
+                } catch (e) {
+                    // File doesn't exist, skip silently
+                }
+            }
+            
+            if (loadedCount > 0) {
+                animStatusEl.textContent = `🎬 ${loadedCount} animations loaded`;
+            } else {
+                animStatusEl.innerHTML = '📁 No VRMA files found<br><small>Run download_vrma.ps1</small>';
+            }
+        }
+        
+        async function loadVRMAFile(url, name, icon = '▶️') {
+            return new Promise((resolve, reject) => {
+                loader.load(
+                    url,
+                    (gltf) => {
+                        const vrmAnimation = gltf.userData.vrmAnimation;
+                        if (vrmAnimation && vrm) {
+                            // Create animation clip from VRMA
+                            const clip = createVRMAnimationClip(vrmAnimation, vrm);
+                            loadedAnimations.set(name, clip);
+                            
+                            // Create UI button
+                            const btn = document.createElement('button');
+                            btn.className = 'anim-btn';
+                            btn.textContent = `${icon} ${name}`;
+                            btn.onclick = () => playAnimation(name, btn);
+                            animControlsEl.appendChild(btn);
+                            
+                            console.log(`Loaded VRMA: ${name}`);
+                            resolve();
+                        } else {
+                            reject(new Error('No VRM animation data'));
+                        }
+                    },
+                    undefined,
+                    (error) => {
+                        console.warn(`Failed to load VRMA ${name}:`, error);
+                        reject(error);
+                    }
+                );
+            });
+        }
+        
+        function playAnimation(name, btn = null) {
+            if (!mixer || !vrm) return;
+            
+            const clip = loadedAnimations.get(name);
+            if (!clip) return;
+            
+            // Stop current animation
+            if (currentAction) {
+                currentAction.fadeOut(0.3);
+            }
+            
+            // Update button states
+            document.querySelectorAll('.anim-btn').forEach(b => b.classList.remove('playing'));
+            if (btn) btn.classList.add('playing');
+            
+            // Play new animation
+            currentAction = mixer.clipAction(clip);
+            currentAction.reset();
+            currentAction.setLoop(THREE.LoopOnce, 1);
+            currentAction.clampWhenFinished = true;
+            currentAction.fadeIn(0.3);
+            currentAction.play();
+            
+            isPlayingVRMA = true;
+            
+            // Return to idle pose after animation ends
+            mixer.addEventListener('finished', function onFinished(e) {
+                if (e.action === currentAction) {
+                    mixer.removeEventListener('finished', onFinished);
+                    isPlayingVRMA = false;
+                    if (btn) btn.classList.remove('playing');
+                    
+                    // Smoothly return to idle pose
+                    setTimeout(() => {
+                        if (!isPlayingVRMA) setupIdlePose();
+                    }, 100);
+                }
+            });
+        }
+        
+        // Expose playAnimation globally for WebSocket commands
+        window.playAnimation = playAnimation;
+
+        // Mouse tracking for eye follow
+        let mouseX = 0, mouseY = 0;
+        window.addEventListener('mousemove', (event) => {
+            // Map mouse position to world coordinates
+            mouseX = ((event.clientX / window.innerWidth) - 0.5) * 4;
+            mouseY = -((event.clientY / window.innerHeight) - 0.5) * 2 + 1.4;
+            
+            // Smoothly update lookAt target
+            lookAtTarget.position.x = mouseX;
+            lookAtTarget.position.y = mouseY;
+            lookAtTarget.position.z = 2;
+        });
+
+        // WebSocket connection
+        function connectWebSocket() {
+            const ws = new WebSocket('ws://localhost:8765/ws');
+            
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                statusEl.textContent = '🟢 Connected';
+                statusEl.className = 'connected';
+            };
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                console.log('Received:', data);
+                
+                if (data.type === 'speak_start') {
+                    isSpeaking = true;
+                    speakStartTime = performance.now();
+                    statusEl.textContent = '🎤 Speaking...';
+                    statusEl.className = 'speaking';
+                    
+                    // Analyze text for emotion
+                    if (data.text) {
+                        subtitleEl.textContent = data.text;
+                        subtitleEl.className = 'visible';
+                        detectEmotion(data.text);
+                    }
+                } else if (data.type === 'speak_end') {
+                    isSpeaking = false;
+                    statusEl.textContent = '🟢 Connected';
+                    statusEl.className = 'connected';
+                    
+                    // Fade back to neutral
+                    targetEmotion = 'neutral';
+                    
+                    setTimeout(() => {
+                        subtitleEl.className = '';
+                    }, 2000);
+                } else if (data.type === 'emotion') {
+                    setEmotion(data.emotion);
+                }
+            };
+            
+            ws.onclose = () => {
+                console.log('WebSocket closed, reconnecting...');
+                statusEl.textContent = '🔌 Reconnecting...';
+                statusEl.className = '';
+                setTimeout(connectWebSocket, 2000);
+            };
+            
+            ws.onerror = (err) => {
+                console.error('WebSocket error:', err);
+            };
+        }
+        
+        connectWebSocket();
+
+        function detectEmotion(text) {
+            const lowerText = text.toLowerCase();
+            
+            // Simple keyword-based emotion detection
+            if (/\b(haha|lol|funny|joke|laugh|😂|🤣|😄)\b/.test(lowerText) || 
+                /\b(happy|glad|great|awesome|wonderful|yay)\b/i.test(lowerText)) {
+                targetEmotion = 'happy';
+                emotionEl.textContent = '😊 Happy';
+            } else if (/\b(sorry|sad|unfortunately|😢|😭)\b/.test(lowerText) || lowerText.includes(':(')) {
+                targetEmotion = 'sad';
+                emotionEl.textContent = '😢 Sad';
+            } else if (/\b(what|wow|really|omg|😮|😲)\b/.test(lowerText) ||
+                       /\?\s*$/.test(text) || /!{2,}/.test(text)) {
+                targetEmotion = 'surprised';
+                emotionEl.textContent = '😲 Surprised';
+            } else if (/\b(angry|mad|hate|grr|😠|😡)\b/.test(lowerText)) {
+                targetEmotion = 'angry';
+                emotionEl.textContent = '😠 Angry';
+            } else {
+                targetEmotion = 'relaxed';
+                emotionEl.textContent = '😌 Relaxed';
+            }
+        }
+
+        function setEmotion(emotion) {
+            targetEmotion = emotion;
+            const emotionIcons = {
+                'happy': '😊 Happy',
+                'sad': '😢 Sad',
+                'angry': '😠 Angry',
+                'surprised': '😲 Surprised',
+                'relaxed': '😌 Relaxed',
+                'neutral': '😐 Neutral'
+            };
+            emotionEl.textContent = emotionIcons[emotion] || '😊 Neutral';
+        }
+
+        // Animation loop
+        const clock = new THREE.Clock();
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            const delta = clock.getDelta();
+            idleTime += delta;
+            
+            if (vrm) {
+                const em = vrm.expressionManager;
+                
+                // === LIP SYNC + TALKING GESTURES ===
+                if (isSpeaking && em) {
+                    const t = (performance.now() - speakStartTime) / 1000;
+                    
+                    // Cycle through vowels for more realistic lip sync
+                    vowelTimer += delta;
+                    if (vowelTimer > 0.08 + Math.random() * 0.06) {
+                        vowelTimer = 0;
+                        currentVowelIndex = Math.floor(Math.random() * vowels.length);
+                    }
+                    
+                    // Animate mouth with varying intensity
+                    const intensity = 0.3 + Math.sin(t * 8) * 0.15 + Math.sin(t * 13) * 0.1;
+                    const mouthOpen = Math.max(0, Math.min(1, intensity));
+                    
+                    // Reset all vowels
+                    vowels.forEach(v => {
+                        if (em.getExpression(v)) em.setValue(v, 0);
+                    });
+                    
+                    // Set current vowel
+                    const currentVowel = vowels[currentVowelIndex];
+                    if (em.getExpression(currentVowel)) {
+                        em.setValue(currentVowel, mouthOpen);
+                    }
+                    
+                    // Expressive head movement when speaking
+                    const head = vrm.humanoid?.getNormalizedBoneNode('head');
+                    if (head) {
+                        head.rotation.y = Math.sin(t * 2.5) * 0.12 + Math.sin(t * 4) * 0.05;
+                        head.rotation.x = Math.sin(t * 1.8) * 0.06 - 0.05;
+                        head.rotation.z = Math.sin(t * 3) * 0.04;
+                    }
+                    
+                    // === TALKING HAND GESTURES ===
+                    const leftUpperArm = vrm.humanoid?.getNormalizedBoneNode('leftUpperArm');
+                    const rightUpperArm = vrm.humanoid?.getNormalizedBoneNode('rightUpperArm');
+                    const leftLowerArm = vrm.humanoid?.getNormalizedBoneNode('leftLowerArm');
+                    const rightLowerArm = vrm.humanoid?.getNormalizedBoneNode('rightLowerArm');
+                    const leftHand = vrm.humanoid?.getNormalizedBoneNode('leftHand');
+                    const rightHand = vrm.humanoid?.getNormalizedBoneNode('rightHand');
+                    
+                    // Gesturing arms - expressive when talking (raised higher, bigger movements)
+                    if (leftUpperArm) {
+                        leftUpperArm.rotation.z = 0.6 + Math.sin(t * 2.2) * 0.35 + Math.sin(t * 3.7) * 0.15;
+                        leftUpperArm.rotation.x = 0.4 + Math.sin(t * 1.8) * 0.25;
+                        leftUpperArm.rotation.y = Math.sin(t * 2.5) * 0.15;
+                    }
+                    if (rightUpperArm) {
+                        rightUpperArm.rotation.z = -0.6 + Math.sin(t * 2.0 + 1) * 0.35 + Math.sin(t * 3.5) * 0.15;
+                        rightUpperArm.rotation.x = 0.4 + Math.sin(t * 1.9 + 0.5) * 0.25;
+                        rightUpperArm.rotation.y = Math.sin(t * 2.3 + 0.5) * 0.15;
+                    }
+                    
+                    // Lower arms - bigger emphasis gestures
+                    if (leftLowerArm) {
+                        leftLowerArm.rotation.y = -0.5 + Math.sin(t * 3) * 0.35;
+                        leftLowerArm.rotation.z = Math.sin(t * 2.5) * 0.25;
+                    }
+                    if (rightLowerArm) {
+                        rightLowerArm.rotation.y = 0.5 + Math.sin(t * 2.8 + 0.3) * 0.35;
+                        rightLowerArm.rotation.z = Math.sin(t * 2.3 + 0.5) * 0.25;
+                    }
+                    
+                    // Wrist/hand movements - more expressive pointing, waving, gesturing
+                    if (leftHand) {
+                        leftHand.rotation.z = Math.sin(t * 4) * 0.4;
+                        leftHand.rotation.x = Math.sin(t * 3.5) * 0.3;
+                        leftHand.rotation.y = Math.sin(t * 2.8) * 0.35;
+                    }
+                    if (rightHand) {
+                        rightHand.rotation.z = Math.sin(t * 3.8 + 0.5) * 0.4;
+                        rightHand.rotation.x = Math.sin(t * 3.2 + 0.3) * 0.3;
+                        rightHand.rotation.y = Math.sin(t * 2.5 + 0.7) * 0.35;
+                    }
+                    
+                    // Finger movements when talking
+                    const fingerBones = ['leftIndexProximal', 'leftMiddleProximal', 'leftRingProximal', 'leftLittleProximal',
+                                        'rightIndexProximal', 'rightMiddleProximal', 'rightRingProximal', 'rightLittleProximal'];
+                    fingerBones.forEach((name, i) => {
+                        const bone = vrm.humanoid?.getNormalizedBoneNode(name);
+                        if (bone) {
+                            bone.rotation.z = Math.sin(t * (3 + i * 0.3) + i * 0.5) * 0.25;
+                        }
+                    });
+                    
+                    // Body leans into conversation
+                    const spine = vrm.humanoid?.getNormalizedBoneNode('spine');
+                    if (spine) {
+                        spine.rotation.x = 0.04 + Math.sin(t * 1.5) * 0.05;
+                        spine.rotation.y = Math.sin(t * 2) * 0.06;
+                    }
+                    
+                } else if (em) {
+                    // Close mouth when not speaking
+                    vowels.forEach(v => {
+                        if (em.getExpression(v)) em.setValue(v, 0);
+                    });
+                }
+                
+                // === EMOTIONS ===
+                if (em) {
+                    // Smoothly blend to target emotion
+                    const emotions = ['happy', 'sad', 'angry', 'surprised', 'relaxed', 'neutral'];
+                    emotions.forEach(emo => {
+                        if (em.getExpression(emo)) {
+                            const current = em.getValue(emo) || 0;
+                            const target = (emo === targetEmotion) ? 0.6 : 0;
+                            const newVal = current + (target - current) * delta * 3;
+                            em.setValue(emo, newVal);
+                        }
+                    });
+                }
+                
+                // === NATURAL BLINKING ===
+                blinkTimer += delta;
+                if (!isBlinking && blinkTimer > nextBlinkTime) {
+                    isBlinking = true;
+                    blinkTimer = 0;
+                    // Sometimes do a double blink
+                    nextBlinkTime = Math.random() < 0.2 ? 0.2 : (2 + Math.random() * 4);
+                }
+                
+                if (isBlinking && em) {
+                    const blinkProgress = blinkTimer / 0.12;
+                    if (blinkProgress < 1) {
+                        const blinkVal = Math.sin(blinkProgress * Math.PI);
+                        if (em.getExpression('blink')) em.setValue('blink', blinkVal);
+                    } else {
+                        if (em.getExpression('blink')) em.setValue('blink', 0);
+                        isBlinking = false;
+                        blinkTimer = 0;
+                    }
+                }
+                
+                // === IDLE ANIMATION (when not speaking and not playing VRMA) ===
+                if (!isSpeaking && !isPlayingVRMA && vrm.humanoid) {
+                    // Breathing - chest/spine rises and falls
+                    const spine = vrm.humanoid.getNormalizedBoneNode('spine');
+                    const chest = vrm.humanoid.getNormalizedBoneNode('chest') || vrm.humanoid.getNormalizedBoneNode('upperChest');
+                    if (spine) {
+                        spine.rotation.x = Math.sin(idleTime * 1.2 + bodyIdlePhase) * 0.04;
+                    }
+                    if (chest) {
+                        chest.rotation.x = Math.sin(idleTime * 1.2 + bodyIdlePhase) * 0.02;
+                    }
+                    
+                    // Body sway - weight shifting
+                    const hips = vrm.humanoid.getNormalizedBoneNode('hips');
+                    if (hips) {
+                        hips.rotation.y = Math.sin(idleTime * 0.4 + bodyIdlePhase) * 0.08;
+                        hips.rotation.z = Math.sin(idleTime * 0.25) * 0.03; // Side lean
+                    }
+                    
+                    // Head movement - looking around
+                    const head = vrm.humanoid.getNormalizedBoneNode('head');
+                    if (head) {
+                        head.rotation.y = Math.sin(idleTime * 0.5 + headIdlePhase) * 0.15 + Math.sin(idleTime * 0.2) * 0.05;
+                        head.rotation.x = Math.sin(idleTime * 0.4 + headIdlePhase) * 0.08 - 0.03;
+                        head.rotation.z = Math.sin(idleTime * 0.3 + headIdlePhase) * 0.05;
+                    }
+                    
+                    // Shoulder movement - breathing effect
+                    const leftShoulder = vrm.humanoid.getNormalizedBoneNode('leftShoulder');
+                    const rightShoulder = vrm.humanoid.getNormalizedBoneNode('rightShoulder');
+                    if (leftShoulder) {
+                        leftShoulder.rotation.z = Math.sin(idleTime * 1.2) * 0.04;
+                        leftShoulder.rotation.y = Math.sin(idleTime * 0.5) * 0.03;
+                    }
+                    if (rightShoulder) {
+                        rightShoulder.rotation.z = -Math.sin(idleTime * 1.2) * 0.04;
+                        rightShoulder.rotation.y = -Math.sin(idleTime * 0.5) * 0.03;
+                    }
+                    
+                    // More expressive arm movements - like adjusting stance, hands moving
+                    const leftUpperArm = vrm.humanoid.getNormalizedBoneNode('leftUpperArm');
+                    const rightUpperArm = vrm.humanoid.getNormalizedBoneNode('rightUpperArm');
+                    const leftLowerArm = vrm.humanoid.getNormalizedBoneNode('leftLowerArm');
+                    const rightLowerArm = vrm.humanoid.getNormalizedBoneNode('rightLowerArm');
+                    
+                    // Occasional bigger arm movements using modulated sine waves
+                    const armCycle = Math.sin(idleTime * 0.15) * 0.5 + 0.5; // 0-1 over ~40 seconds
+                    const fidgetCycle = Math.sin(idleTime * 0.08) > 0.7 ? 1 : 0; // Occasional fidget bursts
+                    
+                    if (leftUpperArm) {
+                        leftUpperArm.rotation.z = 0.95 + Math.sin(idleTime * 0.6) * 0.18 + armCycle * 0.15;
+                        leftUpperArm.rotation.x = 0.2 + Math.sin(idleTime * 0.45) * 0.12 + fidgetCycle * 0.1;
+                        leftUpperArm.rotation.y = Math.sin(idleTime * 0.35) * 0.1;
+                    }
+                    if (rightUpperArm) {
+                        rightUpperArm.rotation.z = -0.95 + Math.sin(idleTime * 0.55 + 1.5) * 0.18 - armCycle * 0.15;
+                        rightUpperArm.rotation.x = 0.2 + Math.sin(idleTime * 0.5 + 0.8) * 0.12 + fidgetCycle * 0.08;
+                        rightUpperArm.rotation.y = Math.sin(idleTime * 0.4 + 0.5) * 0.1;
+                    }
+                    if (leftLowerArm) {
+                        leftLowerArm.rotation.y = -0.4 + Math.sin(idleTime * 0.7) * 0.22 + fidgetCycle * 0.15;
+                        leftLowerArm.rotation.z = Math.sin(idleTime * 0.55) * 0.15;
+                    }
+                    if (rightLowerArm) {
+                        rightLowerArm.rotation.y = 0.4 + Math.sin(idleTime * 0.65 + 0.4) * 0.22 + fidgetCycle * 0.12;
+                        rightLowerArm.rotation.z = Math.sin(idleTime * 0.5 + 0.3) * 0.15;
+                    }
+                    
+                    // Hand/wrist movements - fidgeting, adjusting, more noticeable
+                    const leftHand = vrm.humanoid.getNormalizedBoneNode('leftHand');
+                    const rightHand = vrm.humanoid.getNormalizedBoneNode('rightHand');
+                    if (leftHand) {
+                        leftHand.rotation.z = Math.sin(idleTime * 0.8) * 0.3 + fidgetCycle * 0.15;
+                        leftHand.rotation.x = Math.sin(idleTime * 0.6) * 0.2;
+                        leftHand.rotation.y = Math.sin(idleTime * 0.5) * 0.18;
+                    }
+                    if (rightHand) {
+                        rightHand.rotation.z = Math.sin(idleTime * 0.75 + 0.6) * 0.3 + fidgetCycle * 0.12;
+                        rightHand.rotation.x = Math.sin(idleTime * 0.55 + 0.4) * 0.2;
+                        rightHand.rotation.y = Math.sin(idleTime * 0.45 + 0.3) * 0.18;
+                    }
+                    
+                    // Finger movements - more noticeable fidgeting
+                    const fingerBones = ['leftIndexProximal', 'leftMiddleProximal', 'leftRingProximal', 'leftLittleProximal',
+                                        'rightIndexProximal', 'rightMiddleProximal', 'rightRingProximal', 'rightLittleProximal'];
+                    fingerBones.forEach((name, i) => {
+                        const bone = vrm.humanoid.getNormalizedBoneNode(name);
+                        if (bone) {
+                            bone.rotation.z = Math.sin(idleTime * (0.5 + i * 0.12) + i) * 0.25 + fidgetCycle * 0.1;
+                        }
+                    });
+                    
+                    // Thumb movements
+                    const thumbBones = ['leftThumbProximal', 'rightThumbProximal'];
+                    thumbBones.forEach((name, i) => {
+                        const bone = vrm.humanoid.getNormalizedBoneNode(name);
+                        if (bone) {
+                            bone.rotation.z = Math.sin(idleTime * 0.6 + i * 2) * 0.2;
+                        }
+                    });
+                }
+                
+                // Update animation mixer
+                if (mixer) {
+                    mixer.update(delta);
+                }
+                
+                vrm.update(delta);
+            }
+            
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        
+        animate();
+
+        // Handle resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>

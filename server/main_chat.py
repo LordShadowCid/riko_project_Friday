@@ -1,14 +1,69 @@
-from process.asr_func.asr_push_to_talk import record_and_transcribe, transcribe_file
-from process.llm_funcs.llm_scr import llm_response
-from process.tts_func.sovits_ping import sovits_gen, play_audio
+from server.process.asr_func.asr_push_to_talk import record_and_transcribe, transcribe_file
+from server.process.llm_funcs.llm_scr import llm_response
+from server.process.tts_func.sovits_ping import sovits_gen, play_audio
 from pathlib import Path
 import os
 import time
+import asyncio
+import threading
 ### transcribe audio 
 import uuid
 import soundfile as sf
 
-from riko_config import load_config, repo_root, resolve_repo_path
+from server.riko_config import load_config, repo_root, resolve_repo_path
+
+# Avatar server integration
+avatar_api = None
+avatar_loop = None
+
+def _start_avatar_server():
+    """Start the avatar WebSocket server in a background thread"""
+    global avatar_api, avatar_loop
+    
+    try:
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent.parent / "client"))
+        from avatar_server import start_avatar_server, get_avatar_api
+        
+        avatar_loop = asyncio.new_event_loop()
+        
+        def run_server():
+            asyncio.set_event_loop(avatar_loop)
+            avatar_loop.run_until_complete(start_avatar_server())
+            avatar_loop.run_forever()
+        
+        thread = threading.Thread(target=run_server, daemon=True)
+        thread.start()
+        
+        # Give server time to start
+        time.sleep(0.5)
+        
+        avatar_api = get_avatar_api()
+        print("[Avatar] Server started at http://localhost:8765")
+        
+    except ImportError as e:
+        print(f"[Avatar] Could not start avatar server (missing aiohttp?): {e}")
+        print("[Avatar] Install with: pip install aiohttp")
+    except Exception as e:
+        print(f"[Avatar] Could not start avatar server: {e}")
+
+
+def avatar_speak_start(text: str = None):
+    """Notify avatar that speaking is starting"""
+    if avatar_api and avatar_loop:
+        asyncio.run_coroutine_threadsafe(
+            avatar_api['speak_start'](text), 
+            avatar_loop
+        )
+
+
+def avatar_speak_end():
+    """Notify avatar that speaking has ended"""
+    if avatar_api and avatar_loop:
+        asyncio.run_coroutine_threadsafe(
+            avatar_api['speak_end'](), 
+            avatar_loop
+        )
 
 
 def _prepare_whisper_model_source(model_name: str) -> str:
@@ -118,6 +173,9 @@ def get_wav_duration(path):
 
 print(' \n ========= Starting Chat... ================ \n')
 
+# Start avatar server
+_start_avatar_server()
+
 char_config = load_config()
 
 whisper_cfg = char_config.get('whisper', {}) or {}
@@ -214,7 +272,13 @@ while True:
             print("TTS generation failed (is GPT-SoVITS running on 127.0.0.1:9880?)")
             continue
 
+        # Notify avatar to start lip-sync
+        avatar_speak_start(llm_output)
+        
         play_audio(output_wav_path, output_device=output_device)
+        
+        # Notify avatar to stop lip-sync
+        avatar_speak_end()
 
     except KeyboardInterrupt:
         print("\nExiting...")
