@@ -36,7 +36,20 @@ def _resolve_device(device, kind='input'):
     return None
 
 
-def play_audio(path, output_device=None):
+def play_audio(path, output_device=None, interrupt_flag=None):
+    """
+    Play audio file with optional interruption support.
+    
+    Args:
+        path: Path to WAV file
+        output_device: Output device (name, index, or None)
+        interrupt_flag: Optional threading.Event - if set, playback stops
+        
+    Returns:
+        True if played fully, False if interrupted
+    """
+    import numpy as np
+    
     data, samplerate = sf.read(path)
     device = _resolve_device(output_device, kind='output')
     
@@ -54,13 +67,34 @@ def play_audio(path, output_device=None):
             data = data.mean(axis=1)  # stereo -> mono
         # Convert mono to stereo if device requires stereo
         elif data.ndim == 1 and max_out_ch >= 2:
-            import numpy as np
             data = np.column_stack([data, data])  # mono -> stereo
     except Exception as e:
         print(f"Warning: could not query device capabilities: {e}")
     
-    sd.play(data, samplerate, device=device)
-    sd.wait()  # Wait until playback is finished
+    if interrupt_flag is None:
+        # Simple playback without interruption support
+        sd.play(data, samplerate, device=device)
+        sd.wait()
+        return True
+    else:
+        # Interruptible playback - check flag periodically
+        sd.play(data, samplerate, device=device)
+        
+        # Calculate total duration
+        duration = len(data) / samplerate
+        check_interval = 0.05  # Check every 50ms
+        elapsed = 0
+        
+        while elapsed < duration:
+            if interrupt_flag.is_set():
+                sd.stop()
+                print("🛑 Playback interrupted!")
+                return False
+            time.sleep(check_interval)
+            elapsed += check_interval
+        
+        sd.wait()
+        return True
 
 def sovits_gen(in_text, output_wav_pth = "output.wav"):
     url = "http://127.0.0.1:9880/tts"
@@ -82,20 +116,17 @@ def sovits_gen(in_text, output_wav_pth = "output.wav"):
     }
 
     try:
-        response = requests.post(url, json=payload)
+        response = requests.post(url, json=payload, timeout=30)
         response.raise_for_status()  # throws if not 200
-
-        print(response)
 
         # Save the response audio if it's binary
         with open(output_wav_pth, "wb") as f:
             f.write(response.content)
-        # print("Audio saved as output.wav")
 
         return output_wav_pth
 
     except Exception as e:
-        print("Error in sovits_gen:", e)
+        print(f"Error in sovits_gen: {e}")
         return None
 
 

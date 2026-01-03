@@ -1,12 +1,18 @@
 from server.process.asr_func.asr_push_to_talk import record_and_transcribe, transcribe_file
-from server.process.llm_funcs.llm_scr import llm_response
+from server.process.asr_func.asr_vad import (
+    record_vad_and_transcribe, 
+    BackgroundListener,
+    get_interrupt_flag,
+    get_speaking_flag,
+)
+from server.process.llm_funcs.llm_scr import llm_response, llm_response_streaming
 from server.process.tts_func.sovits_ping import sovits_gen, play_audio
 from pathlib import Path
 import os
 import time
 import asyncio
 import threading
-### transcribe audio 
+import queue
 import uuid
 import soundfile as sf
 
@@ -142,10 +148,13 @@ def _startup_self_check(char_config: dict, input_device, output_device, whisper_
         print(f"Audio: input_device={input_device!r}, output_device={output_device!r}")
 
     # Whisper settings recap
+    w_device = whisper_cfg.get('device', 'cpu')
+    w_device_idx = whisper_cfg.get('device_index', 0)
+    device_str = f"{w_device}" + (f" (GPU {w_device_idx})" if w_device == 'cuda' else "")
     print(
         "Whisper config: "
         + f"model={whisper_cfg.get('model', 'base.en')} "
-        + f"device={whisper_cfg.get('device', 'cpu')} "
+        + f"device={device_str} "
         + f"compute_type={whisper_cfg.get('compute_type', 'float32')}"
     )
 
@@ -171,6 +180,39 @@ def get_wav_duration(path):
         return len(f) / f.samplerate
 
 
+def clean_text_for_tts(text: str) -> str:
+    """Clean up LLM output for natural TTS playback.
+    
+    Removes:
+    - Asterisk actions like *laughs* or *sighs*
+    - ALL CAPS words (converts to lowercase)
+    - Multiple exclamation/question marks
+    """
+    import re
+    
+    if not text:
+        return text
+    
+    # Remove asterisk-wrapped actions like *laughs* or *OH BOY*
+    # This handles both actions and emphasized words
+    text = re.sub(r'\*[^*]+\*', '', text)
+    
+    # Convert ALL CAPS words (3+ letters) to title case
+    def fix_caps(match):
+        word = match.group(0)
+        return word.capitalize()
+    
+    text = re.sub(r'\b[A-Z]{3,}\b', fix_caps, text)
+    
+    # Reduce multiple punctuation (!!!! -> !)
+    text = re.sub(r'([!?]){2,}', r'\1', text)
+    
+    # Clean up extra whitespace from removals
+    text = re.sub(r'\s+', ' ', text).strip()
+    
+    return text
+
+
 print(' \n ========= Starting Chat... ================ \n')
 
 # Start avatar server
@@ -187,14 +229,23 @@ from faster_whisper import WhisperModel
 
 whisper_model_name = whisper_cfg.get('model', 'base.en')
 whisper_device = whisper_cfg.get('device', 'cpu')
+whisper_device_index = whisper_cfg.get('device_index', 0)  # Which GPU to use
 whisper_compute_type = whisper_cfg.get('compute_type', 'float32')
 
 whisper_model_source = _prepare_whisper_model_source(str(whisper_model_name))
-print(f"Whisper: model={whisper_model_name} device={whisper_device} compute_type={whisper_compute_type}")
+device_info = f"device={whisper_device}"
+if whisper_device == 'cuda':
+    device_info += f" (GPU {whisper_device_index})"
+print(f"Whisper: model={whisper_model_name} {device_info} compute_type={whisper_compute_type}")
 if whisper_model_source != whisper_model_name:
     print(f"Whisper: using local model folder: {whisper_model_source}")
 try:
-    whisper_model = WhisperModel(whisper_model_source, device=whisper_device, compute_type=whisper_compute_type)
+    whisper_model = WhisperModel(
+        whisper_model_source,
+        device=whisper_device,
+        device_index=whisper_device_index,
+        compute_type=whisper_compute_type
+    )
 except Exception as e:
     msg = str(e)
     cuda_requested = str(whisper_device).lower() == "cuda"
@@ -216,7 +267,39 @@ audio_cfg = char_config.get('audio', {}) or {}
 input_device = audio_cfg.get('input_device')
 output_device = audio_cfg.get('output_device')
 
+# VAD configuration - can be added to character_config.yaml later
+vad_cfg = char_config.get('vad', {}) or {}
+use_vad = vad_cfg.get('enabled', True)  # Default to hands-free mode
+vad_aggressiveness = vad_cfg.get('aggressiveness', 3)  # 0-3, higher = more aggressive filtering
+silence_threshold = vad_cfg.get('silence_threshold_sec', 1.0)
+# Interrupt detection settings - higher values = less sensitive (fewer false interrupts)
+interrupt_aggressiveness = vad_cfg.get('interrupt_aggressiveness', 3)  # Max filtering for interrupts
+interrupt_speech_frames = vad_cfg.get('interrupt_speech_frames', 15)  # ~450ms of sustained speech needed
+interrupt_min_energy = vad_cfg.get('interrupt_min_energy', 500)  # Minimum volume to trigger interrupt
+
+# Speaker identification settings
+speaker_id_cfg = char_config.get('speaker_id', {}) or {}
+use_speaker_id = speaker_id_cfg.get('enabled', True)
+speaker_id_threshold = speaker_id_cfg.get('threshold', 0.75)
+current_speaker = None  # Track who is currently speaking
+
 _startup_self_check(char_config, input_device, output_device, whisper_cfg)
+
+if use_vad:
+    print("\n🎤 HANDS-FREE MODE enabled - just start speaking!")
+    print("   (Annabeth will listen and respond automatically)")
+    print("   (You can interrupt her while she's speaking)\n")
+else:
+    print("\n🔘 PUSH-TO-TALK MODE - press ENTER to record\n")
+
+# Background listener for interruption detection (uses stricter settings to avoid false triggers)
+bg_listener = BackgroundListener(
+    input_device=input_device,
+    sample_rate=16000,
+    vad_aggressiveness=interrupt_aggressiveness,
+    speech_frames_threshold=interrupt_speech_frames,
+    min_audio_energy=interrupt_min_energy,
+)
 
 while True:
     conversation_recording = Path("audio") / "conversation.wav"
@@ -225,12 +308,31 @@ while True:
     output_wav_path = None
 
     try:
+        # Clear any previous interrupt flags
+        get_interrupt_flag().clear()
+        
+        speaker_name = None
         try:
-            user_spoken_text = record_and_transcribe(
-                whisper_model,
-                conversation_recording,
-                input_device=input_device,
-            )
+            if use_vad:
+                # Hands-free VAD-based recording with speaker identification
+                user_spoken_text, speaker_name = record_vad_and_transcribe(
+                    whisper_model,
+                    str(conversation_recording),
+                    input_device=input_device,
+                    sample_rate=16000,
+                    vad_aggressiveness=vad_aggressiveness,
+                    silence_threshold_sec=silence_threshold,
+                    identify_speaker=use_speaker_id,
+                    speaker_threshold=speaker_id_threshold,
+                )
+                current_speaker = speaker_name
+            else:
+                # Traditional push-to-talk
+                user_spoken_text = record_and_transcribe(
+                    whisper_model,
+                    conversation_recording,
+                    input_device=input_device,
+                )
         except Exception as e:
             msg = str(e)
             cudnn_like = ("cudnn" in msg.lower()) or ("cudnn_ops64_9.dll" in msg) or ("cudnnCreateTensorDescriptor" in msg)
@@ -254,37 +356,142 @@ while True:
             print("No transcription captured; try again.")
             continue
 
-        llm_output = llm_response(user_spoken_text)
-        if not llm_output:
-            print("LLM returned empty output; try again.")
-            continue
-
-        print(f"Annabeth: {llm_output}")
-
-        # Generate a unique filename
-        uid = uuid.uuid4().hex
-        filename = f"output_{uid}.wav"
-        output_wav_path = Path("audio") / filename
-        output_wav_path.parent.mkdir(parents=True, exist_ok=True)
-
-        gen_aud_path = sovits_gen(llm_output, output_wav_path)
-        if gen_aud_path is None:
-            print("TTS generation failed (is GPT-SoVITS running on 127.0.0.1:9880?)")
-            continue
-
-        # Notify avatar to start lip-sync
-        avatar_speak_start(llm_output)
+        # Use streaming for faster response - speak each sentence as it arrives
+        # Pipeline: LLM generates → TTS synthesizes → Audio plays (all overlapped)
+        print("Annabeth: ", end="", flush=True)
         
-        play_audio(output_wav_path, output_device=output_device)
+        sentence_queue = queue.Queue()
+        audio_queue = queue.Queue()  # Queue of (sentence, audio_path) tuples
+        full_response = []
+        llm_done = threading.Event()
+        tts_done = threading.Event()
         
-        # Notify avatar to stop lip-sync
+        def on_sentence(sentence: str):
+            """Called for each sentence from the LLM."""
+            full_response.append(sentence)
+            sentence_queue.put(sentence)
+        
+        def run_llm():
+            """Run LLM in background thread."""
+            try:
+                llm_response_streaming(user_spoken_text, on_sentence=on_sentence, speaker_name=speaker_name)
+            finally:
+                llm_done.set()
+                sentence_queue.put(None)  # Signal end
+        
+        def run_tts_pipeline():
+            """Run TTS in background - pre-generate audio while previous plays."""
+            while True:
+                try:
+                    sentence = sentence_queue.get(timeout=0.1)
+                except queue.Empty:
+                    if llm_done.is_set():
+                        break
+                    continue
+                
+                if sentence is None:
+                    break
+                
+                # Clean up the text for natural TTS (remove *actions*, ALL CAPS, etc.)
+                cleaned_sentence = clean_text_for_tts(sentence)
+                if not cleaned_sentence:
+                    continue  # Skip empty sentences after cleanup
+                
+                # Generate TTS for this sentence
+                uid = uuid.uuid4().hex
+                filename = f"output_{uid}.wav"
+                output_path = Path("audio") / filename
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                gen_aud_path = sovits_gen(cleaned_sentence, output_path)
+                if gen_aud_path:
+                    audio_queue.put((sentence, output_path))  # Keep original for display
+                else:
+                    audio_queue.put((sentence, None))  # TTS failed
+            
+            tts_done.set()
+            audio_queue.put(None)  # Signal end
+        
+        # Start LLM generation in background
+        llm_thread = threading.Thread(target=run_llm, daemon=True)
+        llm_thread.start()
+        
+        # Start TTS pipeline in background
+        tts_thread = threading.Thread(target=run_tts_pipeline, daemon=True)
+        tts_thread.start()
+        
+        # Process audio as it arrives - plays while next is being generated
+        first_sentence = True
+        was_interrupted = False
+        
+        while True:
+            try:
+                item = audio_queue.get(timeout=0.1)
+            except queue.Empty:
+                if tts_done.is_set():
+                    break
+                continue
+            
+            if item is None:
+                break
+            
+            sentence, output_wav_path = item
+            
+            # Print the sentence
+            if first_sentence:
+                print(sentence, end="", flush=True)
+                first_sentence = False
+            else:
+                print(f" {sentence}", end="", flush=True)
+            
+            if output_wav_path is None:
+                print("\n(TTS generation failed)")
+                continue
+            
+            # Notify avatar to start lip-sync (first sentence only)
+            if first_sentence or not get_speaking_flag().is_set():
+                avatar_speak_start(sentence)
+            
+            # Start background listener for interruption
+            get_interrupt_flag().clear()
+            get_speaking_flag().set()
+            bg_listener.start()
+            
+            # Play audio with interruption support
+            was_interrupted = not play_audio(
+                output_wav_path, 
+                output_device=output_device,
+                interrupt_flag=get_interrupt_flag(),
+            )
+            
+            # Stop background listener
+            bg_listener.stop()
+            
+            # Clean up this audio file
+            try:
+                output_wav_path.unlink()
+            except Exception:
+                pass
+            
+            if was_interrupted:
+                break
+        
+        print()  # Newline after response
+        
+        # Stop speaking flag and avatar
+        get_speaking_flag().clear()
         avatar_speak_end()
+        
+        if was_interrupted:
+            print("(Annabeth was interrupted - listening for your input...)")
 
     except KeyboardInterrupt:
         print("\nExiting...")
         break
     except Exception as e:
         print("Error during chat loop:", e)
+        import traceback
+        traceback.print_exc()
     finally:
         # clean up audio files
         try:
@@ -293,8 +500,3 @@ while True:
                     fp.unlink()
         except Exception:
             pass
-    # # Example
-    # duration = get_wav_duration(output_wav_path)
-
-    # print("waiting for audio to finish...")
-    # time.sleep(duration)
