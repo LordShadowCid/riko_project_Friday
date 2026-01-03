@@ -23,6 +23,51 @@ from server.annabeth_config import load_config
 
 char_config = load_config()
 
+
+# ============ TTS Sentence Chunking ============
+# Break long sentences at natural pause points to reduce TTS latency spikes
+
+def chunk_long_sentence(sentence: str, max_chars: int = 150) -> list[str]:
+    """
+    Break long sentences at natural pause points (commas, semicolons, colons).
+    This reduces TTS latency spikes on long sentences.
+    
+    Args:
+        sentence: The sentence to potentially chunk
+        max_chars: Maximum characters before trying to split (default 150)
+    
+    Returns:
+        List of sentence chunks (may be just [sentence] if short enough)
+    """
+    if len(sentence) <= max_chars:
+        return [sentence]
+    
+    chunks = []
+    # Split on natural pause points: comma, semicolon, colon, dash
+    pause_pattern = re.compile(r'([,;:\-–—]\s+)')
+    parts = pause_pattern.split(sentence)
+    
+    current = ""
+    for i, part in enumerate(parts):
+        # If adding this part exceeds max and we have content, save current chunk
+        if len(current) + len(part) > max_chars and current.strip():
+            chunks.append(current.strip())
+            current = part
+        else:
+            current += part
+    
+    # Don't forget the last chunk
+    if current.strip():
+        chunks.append(current.strip())
+    
+    # If we couldn't split well, just return original
+    if not chunks:
+        return [sentence]
+    
+    return chunks
+
+# ============ End TTS Sentence Chunking ============
+
 # ============ Response Cache ============
 # RAM-based cache for recent responses to avoid regenerating similar queries
 # Uses LRU eviction to keep memory bounded
@@ -378,7 +423,9 @@ def stream_ollama_response(messages) -> Generator[str, None, str]:
                                 sentence = parts[i] + parts[i + 1]
                                 sentence = sentence.strip()
                                 if sentence:
-                                    yield sentence
+                                    # Chunk long sentences for smoother TTS
+                                    for chunk in chunk_long_sentence(sentence):
+                                        yield chunk
                                 i += 2
                             else:
                                 break
@@ -390,14 +437,16 @@ def stream_ollama_response(messages) -> Generator[str, None, str]:
                 if data.get("done"):
                     break
         
-        # Yield any remaining text
+        # Yield any remaining text (also chunk if long)
         if buffer.strip():
-            yield buffer.strip()
+            for chunk in chunk_long_sentence(buffer.strip()):
+                yield chunk
             
     except Exception as e:
         print(f"[LLM] Streaming error: {e}")
         if buffer.strip():
-            yield buffer.strip()
+            for chunk in chunk_long_sentence(buffer.strip()):
+                yield chunk
     
     return full_response
 

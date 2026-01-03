@@ -13,6 +13,9 @@ import soundfile as sf
 import webrtcvad
 from typing import Tuple, Optional
 
+# Batched inference for long audio (>10 seconds)
+_batched_pipeline = None
+
 
 # Shared state for interruption
 _interrupt_flag = threading.Event()
@@ -285,12 +288,33 @@ def record_vad_and_transcribe(
     
     print("🎯 Transcribing...")
     
-    # Use Silero VAD filter to skip silence and improve transcription speed
-    segments, _ = model.transcribe(
-        output_file,
-        vad_filter=True,
-        vad_parameters=dict(min_silence_duration_ms=500)
-    )
+    # Calculate audio duration to decide transcription method
+    audio_duration = len(audio_data) / sample_rate
+    
+    # Use batched inference for long audio (>10 seconds) - faster on GPU
+    if audio_duration > 10:
+        global _batched_pipeline
+        from faster_whisper import BatchedInferencePipeline
+        
+        if _batched_pipeline is None:
+            _batched_pipeline = BatchedInferencePipeline(model=model)
+            print("[Whisper] Batched pipeline initialized for long audio")
+        
+        segments, _ = _batched_pipeline.transcribe(
+            output_file,
+            batch_size=8,
+            vad_filter=True,
+            vad_parameters=dict(min_silence_duration_ms=500)
+        )
+        print(f"[Whisper] Using batched inference ({audio_duration:.1f}s audio)")
+    else:
+        # Use Silero VAD filter to skip silence and improve transcription speed
+        segments, _ = model.transcribe(
+            output_file,
+            vad_filter=True,
+            vad_parameters=dict(min_silence_duration_ms=500)
+        )
+    
     transcription = " ".join([segment.text for segment in segments]).strip()
     
     print(f"Transcription: {transcription}")
