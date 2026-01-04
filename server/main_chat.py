@@ -1,3 +1,12 @@
+"""
+Main chat loop for Annabeth Desktop Companion.
+
+Handles:
+- Speech recognition (Whisper)
+- LLM conversation
+- TTS synthesis (GPT-SoVITS)
+- Avatar integration
+"""
 from server.process.asr_func.asr_push_to_talk import record_and_transcribe, transcribe_file
 from server.process.asr_func.asr_vad import (
     record_vad_and_transcribe, 
@@ -9,26 +18,47 @@ from server.process.llm_funcs.llm_scr import llm_response, llm_response_streamin
 from server.process.tts_func.sovits_ping import sovits_gen, play_audio
 from pathlib import Path
 import os
+import sys
 import time
 import asyncio
 import threading
 import queue
 import uuid
+import re
 import soundfile as sf
+from typing import Optional
 
 from server.annabeth_config import load_config, repo_root, resolve_repo_path
 
-# Avatar server integration
-avatar_api = None
-avatar_loop = None
+# Add parent directory for shared imports
+_project_root = Path(__file__).parent.parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
 
-def _start_avatar_server():
+from shared import (
+    CompanionMode,
+    get_config,
+    get_companion_state,
+)
+
+# Get shared instances
+_shared_config = get_config()
+_state = get_companion_state()
+
+# Avatar server integration
+avatar_api: Optional[dict] = None
+avatar_loop: Optional[asyncio.AbstractEventLoop] = None
+
+def _start_avatar_server() -> None:
     """Start the avatar WebSocket server in a background thread"""
     global avatar_api, avatar_loop
     
     try:
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent / "client"))
+        # Import from client directory
+        client_dir = _shared_config.paths.client_dir
+        if str(client_dir) not in sys.path:
+            sys.path.insert(0, str(client_dir))
+        
         from avatar_server import start_avatar_server, get_avatar_api
         
         avatar_loop = asyncio.new_event_loop()
@@ -45,7 +75,8 @@ def _start_avatar_server():
         time.sleep(0.5)
         
         avatar_api = get_avatar_api()
-        print("[Avatar] Server started at http://localhost:8765")
+        port = _shared_config.server.avatar_port
+        print(f"[Avatar] Server started at http://localhost:{port}")
         
     except ImportError as e:
         print(f"[Avatar] Could not start avatar server (missing aiohttp?): {e}")
@@ -54,29 +85,30 @@ def _start_avatar_server():
         print(f"[Avatar] Could not start avatar server: {e}")
 
 
-def avatar_speak_start(text: str = None):
+def avatar_speak_start(text: Optional[str] = None) -> None:
     """Notify avatar that speaking is starting"""
     if avatar_api and avatar_loop:
+        _state.speaking = True
         asyncio.run_coroutine_threadsafe(
             avatar_api['speak_start'](text), 
             avatar_loop
         )
 
 
-def avatar_speak_end():
+def avatar_speak_end() -> None:
     """Notify avatar that speaking has ended"""
     if avatar_api and avatar_loop:
+        _state.speaking = False
         asyncio.run_coroutine_threadsafe(
             avatar_api['speak_end'](), 
             avatar_loop
         )
 
 
-def is_listening_paused():
-    """Check if listening should be paused (dance/idle modes)"""
-    if avatar_api and 'is_listening_paused' in avatar_api:
-        return avatar_api['is_listening_paused']()
-    return False
+def is_listening_paused() -> bool:
+    """Check if listening should be paused (dance/idle modes or silenced)"""
+    # Use shared state - this is updated by avatar_server when S key is pressed
+    return _state.is_listening_paused()
 
 
 def _prepare_whisper_model_source(model_name: str) -> str:
@@ -104,7 +136,7 @@ def _prepare_whisper_model_source(model_name: str) -> str:
         return model_name
 
     repo_id = f"Systran/faster-whisper-{model_name}"
-    local_dir = repo_root() / "models" / "faster_whisper" / str(model_name)
+    local_dir = _shared_config.paths.models_dir / "faster_whisper" / str(model_name)
     try:
         local_dir.mkdir(parents=True, exist_ok=True)
         os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
@@ -121,7 +153,7 @@ def _prepare_whisper_model_source(model_name: str) -> str:
         return model_name
 
 
-def _startup_self_check(char_config: dict, input_device, output_device, whisper_cfg: dict):
+def _startup_self_check(char_config: dict, input_device, output_device, whisper_cfg: dict) -> None:
     print("\n--- Startup self-check ---")
 
     # API key sanity
@@ -166,23 +198,21 @@ def _startup_self_check(char_config: dict, input_device, output_device, whisper_
     )
 
     # TTS server reachability (best-effort)
+    tts_url = _shared_config.server.tts_url
     try:
         import requests
-
-        requests.get("http://127.0.0.1:9880/", timeout=1)
+        requests.get(tts_url + "/", timeout=1)
     except Exception:
-        print("NOTE: GPT-SoVITS server not detected at http://127.0.0.1:9880 (start it before chatting)")
+        print(f"NOTE: GPT-SoVITS server not detected at {tts_url} (start it before chatting)")
 
     # Repo root recap
-    try:
-        print(f"Repo root: {repo_root()}")
-    except Exception:
-        pass
+    print(f"Repo root: {_shared_config.paths.project_root}")
 
     print("--- End self-check ---\n")
 
 
-def get_wav_duration(path):
+def get_wav_duration(path) -> float:
+    """Get duration of a WAV file in seconds."""
     with sf.SoundFile(path) as f:
         return len(f) / f.samplerate
 
@@ -195,8 +225,6 @@ def clean_text_for_tts(text: str) -> str:
     - ALL CAPS words (converts to lowercase)
     - Multiple exclamation/question marks
     """
-    import re
-    
     if not text:
         return text
     
@@ -319,11 +347,16 @@ while True:
     # Check if we should pause listening (dance/idle modes or silenced)
     paused = is_listening_paused()
     if paused:
-        print("[Main] Listening paused - waiting...", end='\r')
+        # Use spaces to clear the line when overwriting with \r
+        print("[Main] Listening paused - waiting...          ", end='\r', flush=True)
         time.sleep(0.5)  # Check again in 500ms
         continue
     
-    conversation_recording = Path("audio") / "conversation.wav"
+    # Clear the "waiting" message when resuming
+    print("                                                  ", end='\r', flush=True)
+    
+    audio_dir = _shared_config.paths.audio_dir
+    conversation_recording = audio_dir / "conversation.wav"
     conversation_recording.parent.mkdir(parents=True, exist_ok=True)
 
     output_wav_path = None
@@ -421,7 +454,7 @@ while True:
                 # Generate TTS for this sentence
                 uid = uuid.uuid4().hex
                 filename = f"output_{uid}.wav"
-                output_path = Path("audio") / filename
+                output_path = audio_dir / filename
                 output_path.parent.mkdir(parents=True, exist_ok=True)
                 
                 gen_aud_path = sovits_gen(cleaned_sentence, output_path)
@@ -516,7 +549,7 @@ while True:
     finally:
         # clean up audio files
         try:
-            for fp in Path("audio").glob("*.wav"):
+            for fp in audio_dir.glob("*.wav"):
                 if fp.is_file():
                     fp.unlink()
         except Exception:

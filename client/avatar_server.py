@@ -5,50 +5,64 @@ Includes system audio analysis for beat-reactive dancing
 """
 import asyncio
 import json
-import os
+import sys
 from pathlib import Path
+from typing import Set, Optional, Dict, Any
 from aiohttp import web
 import aiohttp
 
+# Add parent directory to path for shared imports
+_project_root = Path(__file__).parent.parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
+from shared import (
+    CompanionMode,
+    MessageType,
+    get_config,
+    get_companion_state,
+)
+
+# Type aliases
+WebSocketClient = web.WebSocketResponse
+
 # Connected WebSocket clients
-clients = set()
+clients: Set[WebSocketClient] = set()
 
 # Audio analyzer reference
 _audio_analyzer = None
-_audio_broadcast_task = None
+_audio_broadcast_task: Optional["asyncio.Task[None]"] = None
 
-# Current companion mode (active, idle, dance_beat, dance_full)
-_current_mode = "active"
+# Get shared state instance
+_state = get_companion_state()
+_config = get_config()
 
-# Chat silence state (separate from mode - can dance while silenced)
-_chat_silenced = False
 
-def get_current_mode():
+def get_current_mode() -> CompanionMode:
     """Get the current companion mode."""
-    return _current_mode
+    return _state.mode
 
-def is_chat_silenced():
+
+def is_chat_silenced() -> bool:
     """Check if chat is silenced (S key toggle)."""
-    return _chat_silenced
+    return _state.silenced
 
-def set_chat_silenced(silenced: bool):
+
+def set_chat_silenced(silenced: bool) -> None:
     """Set chat silence state."""
-    global _chat_silenced
-    _chat_silenced = silenced
-    print(f"[Avatar] Chat silenced: {silenced}")
+    _state.silenced = silenced
 
-def toggle_chat_silence():
+
+def toggle_chat_silence() -> bool:
     """Toggle chat silence on/off."""
-    global _chat_silenced
-    _chat_silenced = not _chat_silenced
-    print(f"[Avatar] Chat silenced: {_chat_silenced}")
-    return _chat_silenced
+    return _state.toggle_silence()
 
-def is_listening_paused():
+
+def is_listening_paused() -> bool:
     """Check if listening should be paused (silenced OR not in active mode)."""
-    return _chat_silenced or _current_mode != "active"
+    return _state.is_listening_paused()
 
-async def websocket_handler(request):
+async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
     """Handle WebSocket connections from the avatar frontend"""
     ws = web.WebSocketResponse()
     await ws.prepare(request)
@@ -61,16 +75,24 @@ async def websocket_handler(request):
             if msg.type == aiohttp.WSMsgType.TEXT:
                 # Handle incoming messages from frontend
                 data = json.loads(msg.data)
-                if data.get('type') == 'mode_change':
-                    global _current_mode
-                    _current_mode = data.get('mode', 'active')
-                    print(f"[Avatar] Mode changed to: {_current_mode}")
-                elif data.get('type') == 'toggle_silence':
+                msg_type = data.get('type', '')
+                
+                if msg_type == MessageType.MODE_CHANGE.value:
+                    mode_str = data.get('mode', 'active')
+                    try:
+                        _state.mode = CompanionMode(mode_str)
+                    except ValueError:
+                        print(f"[Avatar] Unknown mode: {mode_str}")
+                        
+                elif msg_type == MessageType.TOGGLE_SILENCE.value:
                     toggle_chat_silence()
-                elif data.get('type') == 'set_silence':
+                    
+                elif msg_type == MessageType.SET_SILENCE.value:
                     set_chat_silenced(data.get('silenced', False))
+                    
                 else:
                     print(f"[Avatar] Received: {data}")
+                    
             elif msg.type == aiohttp.WSMsgType.ERROR:
                 print(f"[Avatar] WebSocket error: {ws.exception()}")
     finally:
@@ -80,7 +102,7 @@ async def websocket_handler(request):
     return ws
 
 
-async def broadcast(message: dict):
+async def broadcast(message: Dict[str, Any]) -> None:
     """Send a message to all connected clients"""
     if not clients:
         return
@@ -93,57 +115,58 @@ async def broadcast(message: dict):
     ], return_exceptions=True)
 
 
-async def speak_start(text: str = None):
+async def speak_start(text: Optional[str] = None) -> None:
     """Notify frontend that TTS is starting"""
     await broadcast({
-        "type": "speak_start",
+        "type": MessageType.SPEAK_START.value,
         "text": text
     })
 
 
-async def speak_end():
+async def speak_end() -> None:
     """Notify frontend that TTS has finished"""
     await broadcast({
-        "type": "speak_end"
+        "type": MessageType.SPEAK_END.value
     })
 
 
-async def set_emotion(emotion: str):
+async def set_emotion(emotion: str) -> None:
     """Set avatar emotion (happy, sad, angry, surprised)"""
     await broadcast({
-        "type": "emotion",
+        "type": MessageType.EMOTION.value,
         "emotion": emotion
     })
 
 
-async def send_audio_data(data: dict):
+async def send_audio_data(data: Dict[str, Any]) -> None:
     """Send audio analysis data to all clients"""
     await broadcast({
-        "type": "audio_analysis",
+        "type": MessageType.AUDIO_ANALYSIS.value,
         **data
     })
 
 
-async def _audio_broadcast_loop():
+async def _audio_broadcast_loop() -> None:
     """Continuously broadcast audio analysis data"""
     global _audio_analyzer
+    
+    # Use configured frame rate
+    frame_delay = 1.0 / _config.audio.audio_broadcast_fps
     
     while True:
         if _audio_analyzer and clients:
             analysis = _audio_analyzer.get_analysis()
             await send_audio_data(analysis)
-        await asyncio.sleep(0.033)  # ~30 FPS
+        await asyncio.sleep(frame_delay)
 
 
-def start_audio_analyzer():
+def start_audio_analyzer() -> bool:
     """Start the system audio analyzer"""
     global _audio_analyzer, _audio_broadcast_task
     
     try:
         # Import from the same directory
-        import sys
-        from pathlib import Path
-        client_dir = Path(__file__).parent
+        client_dir = _config.paths.client_dir
         if str(client_dir) not in sys.path:
             sys.path.insert(0, str(client_dir))
         
@@ -168,7 +191,7 @@ def start_audio_analyzer():
         return False
 
 
-def stop_audio_analyzer():
+def stop_audio_analyzer() -> None:
     """Stop the audio analyzer"""
     global _audio_analyzer
     if _audio_analyzer:
@@ -176,22 +199,22 @@ def stop_audio_analyzer():
         _audio_analyzer = None
 
 
-async def index_handler(request):
+async def index_handler(_request: web.Request) -> web.FileResponse:
     """Serve the main HTML page"""
-    html_path = Path(__file__).parent / "index.html"
+    html_path = _config.paths.client_dir / "index.html"
     return web.FileResponse(html_path)
 
 
-async def companion_handler(request):
+async def companion_handler(_request: web.Request) -> web.FileResponse:
     """Serve the desktop companion HTML page (transparent, minimal UI)"""
-    html_path = Path(__file__).parent / "companion.html"
+    html_path = _config.paths.client_dir / "companion.html"
     return web.FileResponse(html_path)
 
 
-def create_app(repo_root: Path = None):
+def create_app(repo_root: Optional[Path] = None) -> web.Application:
     """Create the aiohttp application"""
     if repo_root is None:
-        repo_root = Path(__file__).parent.parent
+        repo_root = _config.paths.project_root
     
     app = web.Application()
     
@@ -201,27 +224,31 @@ def create_app(repo_root: Path = None):
     app.router.add_get('/ws', websocket_handler)
     
     # Static file routes for models
-    models_path = repo_root / "models"
+    models_path = _config.paths.models_dir
     if models_path.exists():
         app.router.add_static('/models', models_path, show_index=True)
     
     # Static file routes for VRMA animations
-    animations_path = repo_root / "animations"
+    animations_path = _config.paths.animations_dir
     if animations_path.exists():
         app.router.add_static('/animations', animations_path, show_index=True)
     
     # Static files for client assets
-    client_path = repo_root / "client"
+    client_path = _config.paths.client_dir
     if client_path.exists():
         app.router.add_static('/client', client_path, show_index=True)
     
     return app
 
 
-async def run_server(host='0.0.0.0', port=8765):
+async def run_server(host: Optional[str] = None, port: Optional[int] = None) -> web.AppRunner:
     """Run the avatar server"""
-    repo_root = Path(__file__).parent.parent
-    app = create_app(repo_root)
+    if host is None:
+        host = _config.server.avatar_host
+    if port is None:
+        port = _config.server.avatar_port
+        
+    app = create_app()
     
     runner = web.AppRunner(app)
     await runner.setup()
@@ -229,19 +256,20 @@ async def run_server(host='0.0.0.0', port=8765):
     site = web.TCPSite(runner, host, port)
     await site.start()
     
+    vrm_path = _config.paths.vrm_model_path
     print(f"[Avatar] Server running at http://localhost:{port}")
     print(f"[Avatar] Open http://localhost:{port} in your browser")
-    print(f"[Avatar] VRM path: {repo_root / 'models' / 'vrm' / 'claire_avatar.vrm'}")
+    print(f"[Avatar] VRM path: {vrm_path}")
     
     return runner
 
 
 # Global reference for the server
-_server_runner = None
-_server_task = None
+_server_runner: Optional[web.AppRunner] = None
+_server_task: Optional["asyncio.Task[None]"] = None
 
 
-async def start_avatar_server():
+async def start_avatar_server() -> web.AppRunner:
     """Start the avatar server (call from main_chat.py)"""
     global _server_runner, _audio_broadcast_task
     _server_runner = await run_server()
@@ -255,7 +283,7 @@ async def start_avatar_server():
     return _server_runner
 
 
-def get_avatar_api():
+def get_avatar_api() -> Dict[str, Any]:
     """Get the avatar control functions"""
     return {
         'speak_start': speak_start,
@@ -269,7 +297,10 @@ def get_avatar_api():
         'is_listening_paused': is_listening_paused,
         'is_chat_silenced': is_chat_silenced,
         'toggle_chat_silence': toggle_chat_silence,
-        'set_chat_silenced': set_chat_silenced
+        'set_chat_silenced': set_chat_silenced,
+        # Add new state accessors
+        'get_state': lambda: _state,
+        'get_config': lambda: _config,
     }
 
 

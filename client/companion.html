@@ -264,6 +264,76 @@
         import { VRMAnimationLoaderPlugin, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
         console.log('✅ VRMA animation support loaded via importmap');
 
+        // =============================================================================
+        // CONFIGURATION CONSTANTS
+        // =============================================================================
+        // These mirror the Python shared/config.py values for consistency
+        
+        const CONFIG = Object.freeze({
+            // Server configuration
+            server: {
+                avatarPort: 8765,
+                wsUrl: 'ws://127.0.0.1:8765/ws',
+            },
+            
+            // Companion modes (must match Python CompanionMode enum)
+            modes: {
+                ACTIVE: 'active',
+                IDLE: 'idle',
+                DANCE_BEAT: 'dance_beat',
+                DANCE_FULL: 'dance_full',
+            },
+            
+            // Message types (must match Python MessageType enum)
+            messageTypes: {
+                MODE_CHANGE: 'mode_change',
+                TOGGLE_SILENCE: 'toggle_silence',
+                SET_SILENCE: 'set_silence',
+                SPEAK_START: 'speak_start',
+                SPEAK_END: 'speak_end',
+                EMOTION: 'emotion',
+                AUDIO_ANALYSIS: 'audio_analysis',
+            },
+            
+            // Audio analysis thresholds
+            audio: {
+                audioThreshold: 0.05,       // Minimum energy to trigger dance
+                beatThreshold: 1.3,          // Threshold for beat detection
+                websocketTimeout: 500,       // ms before falling back to local audio
+                smoothingConstant: 0.8,      // Audio analyzer smoothing
+            },
+            
+            // Animation timing
+            animation: {
+                fadeInDuration: 0.5,         // seconds
+                fadeOutDuration: 0.5,        // seconds
+                blinkDuration: 0.15,         // seconds
+                blinkIntervalMin: 2.0,       // seconds
+                blinkIntervalMax: 6.0,       // seconds
+                lipSyncAmplitude: 0.6,       // mouth open amount when speaking
+            },
+            
+            // Camera settings
+            camera: {
+                fov: 30,
+                near: 0.1,
+                far: 100,
+                positionY: 1.35,
+                positionZ: -2.5,
+                lookAtY: 1.3,
+            },
+            
+            // Model paths
+            paths: {
+                vrmModel: '/models/vrm/claire_avatar.vrm',
+                danceAnimation: '/animations/shikanoko_dance.vrma',
+            },
+        });
+        
+        // =============================================================================
+        // END CONFIGURATION
+        // =============================================================================
+
         // FBX Animation loader for Mixamo dances
         const fbxLoader = new FBXLoader();
         let fbxAnimations = [];  // Store loaded FBX AnimationClips
@@ -371,7 +441,7 @@
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 analyser = audioContext.createAnalyser();
                 analyser.fftSize = 256;
-                analyser.smoothingTimeConstant = 0.8;
+                analyser.smoothingTimeConstant = CONFIG.audio.smoothingConstant;
                 audioDataArray = new Uint8Array(analyser.frequencyBinCount);
                 isAudioSetup = true;
                 console.log('Local audio analyzer setup (fallback)');
@@ -426,9 +496,14 @@
         const scene = new THREE.Scene();
         
         // Camera positioned for desktop companion view - larger, focused on face
-        const camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 100);
-        camera.position.set(0, 1.35, -2.5);  // Closer and centered on face for better mouth visibility
-        camera.lookAt(0, 1.3, 0);
+        const camera = new THREE.PerspectiveCamera(
+            CONFIG.camera.fov, 
+            window.innerWidth / window.innerHeight, 
+            CONFIG.camera.near, 
+            CONFIG.camera.far
+        );
+        camera.position.set(0, CONFIG.camera.positionY, CONFIG.camera.positionZ);
+        camera.lookAt(0, CONFIG.camera.lookAtY, 0);
 
         // Transparent renderer - crucial settings for pywebview transparency
         const renderer = new THREE.WebGLRenderer({ 
@@ -511,7 +586,7 @@
             loader.register((parser) => new VRMAnimationLoaderPlugin(parser));
         }
 
-        const vrmUrl = '/models/vrm/claire_avatar.vrm';
+        const vrmUrl = CONFIG.paths.vrmModel;
         
         loader.load(
             vrmUrl,
@@ -574,7 +649,7 @@
 
         // WebSocket connection
         function connectWebSocket() {
-            window.ws = new WebSocket('ws://127.0.0.1:8765/ws');
+            window.ws = new WebSocket(CONFIG.server.wsUrl);
             
             window.ws.onopen = () => {
                 console.log('WebSocket connected');
@@ -597,7 +672,7 @@
 
         function handleMessage(data) {
             switch(data.type) {
-                case 'speak_start':
+                case CONFIG.messageTypes.SPEAK_START:
                     isSpeaking = true;
                     if (data.text) {
                         subtitleEl.textContent = data.text;
@@ -605,16 +680,16 @@
                     }
                     break;
                     
-                case 'speak_end':
+                case CONFIG.messageTypes.SPEAK_END:
                     isSpeaking = false;
                     subtitleEl.classList.remove('visible');
                     break;
                     
-                case 'emotion':
+                case CONFIG.messageTypes.EMOTION:
                     targetEmotion = data.emotion || 'neutral';
                     break;
                     
-                case 'audio_analysis':
+                case CONFIG.messageTypes.AUDIO_ANALYSIS:
                     // Audio data from Python system audio capture
                     handleAudioAnalysis(data);
                     break;
@@ -878,19 +953,18 @@
         // Store the dance clip for audio-reactive control
         let loadedDanceClip = null;
         let danceAnimationPaused = true;  // Start paused until audio detected
-        const AUDIO_THRESHOLD = 0.05;  // Minimum energy to trigger dance
         
         function playDanceAnimation(clip) {
             if (!mixer || !clip) return;
             
             if (currentAction) {
-                currentAction.fadeOut(0.5);
+                currentAction.fadeOut(CONFIG.animation.fadeOutDuration);
             }
             
             loadedDanceClip = clip;
             currentAction = mixer.clipAction(clip);
             currentAction.reset();
-            currentAction.fadeIn(0.5);
+            currentAction.fadeIn(CONFIG.animation.fadeInDuration);
             currentAction.setLoop(THREE.LoopRepeat);
             currentAction.paused = true;  // Start paused - will unpause when audio detected
             currentAction.play();
@@ -901,10 +975,10 @@
         
         // Control dance animation based on audio - called in render loop
         function updateDanceAudioControl() {
-            if (!currentAction || !isPlayingVRMA || window.companionMode !== 'dance_full') return;
+            if (!currentAction || !isPlayingVRMA || window.companionMode !== CONFIG.modes.DANCE_FULL) return;
             
             const audioEnergy = bassEnergy + midEnergy;
-            const hasAudio = audioEnergy > AUDIO_THRESHOLD;
+            const hasAudio = audioEnergy > CONFIG.audio.audioThreshold;
             
             if (hasAudio && danceAnimationPaused) {
                 // Start/resume dancing
@@ -921,7 +995,7 @@
         
         function stopDanceAnimation() {
             if (currentAction) {
-                currentAction.fadeOut(0.5);
+                currentAction.fadeOut(CONFIG.animation.fadeOutDuration);
                 currentAction = null;
             }
             loadedDanceClip = null;
@@ -1074,7 +1148,7 @@
                 console.log('createVRMAnimationClip:', createVRMAnimationClip ? 'loaded' : 'NOT LOADED');
                 
                 // Try to load and play the Shikanoko dance VRMA animation
-                const vrmaUrl = '/animations/shikanoko_dance.vrma';
+                const vrmaUrl = CONFIG.paths.danceAnimation;
                 console.log('🎵 dance_full: Loading VRMA animation from:', vrmaUrl);
                 
                 try {
