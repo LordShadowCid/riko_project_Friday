@@ -97,17 +97,48 @@
             font-family: 'Segoe UI', sans-serif;
             font-size: 10px;
         }
+        
+        /* Mode indicator */
+        #mode-indicator {
+            position: fixed;
+            top: 35px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #fff;
+            font-family: 'Segoe UI', sans-serif;
+            font-size: 11px;
+            padding: 4px 12px;
+            border-radius: 12px;
+            background: rgba(0,0,0,0.5);
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+            z-index: 999;
+        }
+        
+        #mode-indicator.visible {
+            opacity: 1;
+        }
+        
+        #mode-indicator.active { border-left: 3px solid #4CAF50; }
+        #mode-indicator.idle { border-left: 3px solid #9E9E9E; }
+        #mode-indicator.dance_beat { border-left: 3px solid #FF9800; }
+        #mode-indicator.dance_full { border-left: 3px solid #E91E63; }
     </style>
     <!-- QWebChannel for Python communication -->
     <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
 </head>
 <body>
     <div id="drag-handle"><span>⋮⋮ drag to move ⋮⋮</span></div>
+    <div id="mode-indicator">🎤 Active</div>
     <div id="canvas-container"></div>
     <div id="mini-status">🔌 Connecting...</div>
     <div id="subtitle"></div>
 
     <script>
+        // Global WebSocket connection
+        window.ws = null;
+        
         // Initialize QWebChannel for Python communication
         window.pyBridge = null;
         
@@ -117,6 +148,38 @@
                 console.log('QWebChannel connected');
             });
         }
+        
+        // Companion mode management
+        window.companionMode = 'active';  // active, idle, dance_beat, dance_full
+        const modeIndicator = document.getElementById('mode-indicator');
+        
+        const modeInfo = {
+            'active': { icon: '🎤', label: 'Active', class: 'active' },
+            'idle': { icon: '😌', label: 'Idle', class: 'idle' },
+            'dance_beat': { icon: '🎵', label: 'Beat Dance', class: 'dance_beat' },
+            'dance_full': { icon: '💃', label: 'Full Dance', class: 'dance_full' }
+        };
+        
+        window.setCompanionMode = function(mode) {
+            window.companionMode = mode;
+            const info = modeInfo[mode] || modeInfo['active'];
+            modeIndicator.textContent = `${info.icon} ${info.label}`;
+            modeIndicator.className = 'visible ' + info.class;
+            
+            // Show mode indicator briefly
+            setTimeout(() => {
+                modeIndicator.classList.remove('visible');
+            }, 2000);
+            
+            // Notify server of mode change (so it can pause/resume listening)
+            if (window.ws && window.ws.readyState === WebSocket.OPEN) {
+                window.ws.send(JSON.stringify({ type: 'mode_change', mode: mode }));
+            }
+            
+            // Dispatch event for the VRM module
+            window.dispatchEvent(new CustomEvent('modeChange', { detail: mode }));
+            console.log('Mode changed to:', mode);
+        };
         
         // Window dragging via QWebChannel
         let isDragging = false;
@@ -185,7 +248,8 @@
         "imports": {
             "three": "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js",
             "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/",
-            "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.1.0/lib/three-vrm.module.min.js"
+            "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.1.0/lib/three-vrm.module.min.js",
+            "@pixiv/three-vrm-animation": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm-animation@2.1.0/lib/three-vrm-animation.module.min.js"
         }
     }
     </script>
@@ -193,21 +257,170 @@
     <script type="module">
         import * as THREE from 'three';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
         import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
         
-        // Try to load VRMA support (optional)
-        let VRMAnimationLoaderPlugin = null;
-        let createVRMAnimationClip = null;
-        try {
-            const vrmAnimModule = await import('https://cdn.jsdelivr.net/npm/@pixiv/three-vrm-animation@2.1.0/lib/three-vrm-animation.module.min.js');
-            VRMAnimationLoaderPlugin = vrmAnimModule.VRMAnimationLoaderPlugin;
-            createVRMAnimationClip = vrmAnimModule.createVRMAnimationClip;
-        } catch (e) {
-            console.warn('VRMA animation support not available');
+        // Import VRMA animation support
+        import { VRMAnimationLoaderPlugin, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
+        console.log('✅ VRMA animation support loaded via importmap');
+
+        // FBX Animation loader for Mixamo dances
+        const fbxLoader = new FBXLoader();
+        let fbxAnimations = [];  // Store loaded FBX AnimationClips
+        
+        async function loadFBXAnimation(url, name) {
+            return new Promise((resolve, reject) => {
+                fbxLoader.load(url, (fbx) => {
+                    if (fbx.animations && fbx.animations.length > 0) {
+                        const clip = fbx.animations[0];
+                        clip.name = name || url;
+                        
+                        // Debug: log what tracks are in the animation
+                        console.log(`FBX ${name} has ${clip.tracks.length} tracks:`);
+                        clip.tracks.slice(0, 5).forEach(t => console.log(`  - ${t.name}`));
+                        
+                        fbxAnimations.push(clip);
+                        console.log(`Loaded FBX animation: ${clip.name}`);
+                        resolve(clip);
+                    } else {
+                        reject('No animations found in FBX');
+                    }
+                }, 
+                (progress) => console.log(`Loading ${name}: ${Math.round(progress.loaded/1024)}KB`),
+                (error) => {
+                    console.error(`Failed to load FBX ${name}:`, error);
+                    reject(error);
+                });
+            });
+        }
+        
+        // Load available dance animations on startup
+        async function loadDanceAnimations() {
+            const danceFiles = [
+                { url: '/animations/rumba_dancing.fbx', name: 'Rumba' }
+                // Add more dances here as you download them
+            ];
+            
+            for (const dance of danceFiles) {
+                try {
+                    await loadFBXAnimation(dance.url, dance.name);
+                } catch (e) {
+                    console.warn(`Could not load ${dance.name}`);
+                }
+            }
+            
+            if (fbxAnimations.length > 0) {
+                console.log(`Loaded ${fbxAnimations.length} dance animation(s)`);
+            }
         }
 
         const statusEl = document.getElementById('mini-status');
         const subtitleEl = document.getElementById('subtitle');
+        const modeIndicator = document.getElementById('mode-indicator');
+
+        // ============================================
+        // AUDIO ANALYZER FOR BEAT DETECTION
+        // ============================================
+        // Audio data comes from Python via WebSocket (system audio capture)
+        // This allows dancing to YouTube, Pandora, Spotify, etc.
+        
+        // Beat detection state (updated from WebSocket)
+        let bassEnergy = 0;
+        let midEnergy = 0;
+        let highEnergy = 0;
+        let beatEnergy = 0;
+        let isBeat = false;
+        let beatIntensity = 0;
+        
+        // Fallback local audio analyzer (only used if no WebSocket data)
+        let audioContext = null;
+        let analyser = null;
+        let audioDataArray = null;
+        let audioSource = null;
+        let isAudioSetup = false;
+        let lastAudioDataTime = 0;
+        let useWebSocketAudio = false;
+        let audioLogCount = 0;
+        
+        // Handle audio data from Python (called directly by PyQt)
+        function handleAudioAnalysis(data) {
+            bassEnergy = data.bass || 0;
+            midEnergy = data.mid || 0;
+            highEnergy = data.high || 0;
+            beatEnergy = data.energy || 0;
+            isBeat = data.beat || false;
+            beatIntensity = data.beatIntensity || 0;
+            lastAudioDataTime = performance.now();
+            useWebSocketAudio = true;
+            
+            // Log occasionally to show it's working
+            audioLogCount++;
+            if (audioLogCount === 1 || (data.beat && audioLogCount % 30 === 0)) {
+                console.log(`🎵 Audio: bass=${bassEnergy.toFixed(2)} mid=${midEnergy.toFixed(2)} beat=${isBeat}`);
+            }
+        }
+        
+        // Expose to global scope for PyQt injection
+        window.handleAudioAnalysis = handleAudioAnalysis;
+        
+        // Local audio analyzer (fallback - for local files only)
+        function setupLocalAudioAnalyzer() {
+            if (isAudioSetup) return;
+            
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 256;
+                analyser.smoothingTimeConstant = 0.8;
+                audioDataArray = new Uint8Array(analyser.frequencyBinCount);
+                isAudioSetup = true;
+                console.log('Local audio analyzer setup (fallback)');
+            } catch (e) {
+                console.error('Failed to setup local audio analyzer:', e);
+            }
+        }
+        
+        function updateLocalAudioAnalysis() {
+            // Skip if we're getting data from WebSocket
+            if (useWebSocketAudio && performance.now() - lastAudioDataTime < 500) {
+                return;
+            }
+            
+            // If WebSocket stopped sending data, reset flag
+            if (performance.now() - lastAudioDataTime > 500) {
+                useWebSocketAudio = false;
+            }
+            
+            if (!analyser || !audioDataArray) return;
+            
+            analyser.getByteFrequencyData(audioDataArray);
+            
+            const bufferLength = audioDataArray.length;
+            let bassSum = 0, midSum = 0, highSum = 0;
+            const bassEnd = Math.floor(bufferLength * 0.1);
+            const midEnd = Math.floor(bufferLength * 0.5);
+            
+            for (let i = 0; i < bufferLength; i++) {
+                const value = audioDataArray[i] / 255;
+                if (i < bassEnd) bassSum += value;
+                else if (i < midEnd) midSum += value;
+                else highSum += value;
+            }
+            
+            bassEnergy = bassSum / bassEnd;
+            midEnergy = midSum / (midEnd - bassEnd);
+            highEnergy = highSum / (bufferLength - midEnd);
+        }
+        
+        // No longer need music player functions since we capture system audio
+        window.playMusic = function() {
+            console.log('Music playback not needed - Annabeth listens to system audio!');
+            console.log('Just play music in YouTube, Pandora, Spotify, etc.');
+        };
+        
+        window.stopMusic = function() {
+            console.log('Music is controlled by your system, not this app.');
+        };
 
         // Scene setup with transparent background
         const scene = new THREE.Scene();
@@ -281,6 +494,16 @@
         const loadedAnimations = new Map();
         let isPlayingVRMA = false;
         
+        // Dance state
+        let dancePhase = 0;
+        let danceIntensity = 0;
+        let headBobPhase = 0;
+        let armSwayPhase = 0;
+        let hipSwayPhase = 0;
+        
+        // Store original rotations for dance
+        let originalPose = {};
+        
         // Load VRM
         const loader = new GLTFLoader();
         loader.register((parser) => new VRMLoaderPlugin(parser));
@@ -311,6 +534,9 @@
                 
                 setupIdlePose();
                 mixer = new THREE.AnimationMixer(gltf.scene);
+                
+                // Load FBX dance animations
+                loadDanceAnimations();
                 
                 statusEl.textContent = '✅ Ready';
                 statusEl.classList.add('visible');
@@ -347,26 +573,24 @@
         }
 
         // WebSocket connection
-        let ws = null;
-        
         function connectWebSocket() {
-            ws = new WebSocket('ws://127.0.0.1:8765/ws');
+            window.ws = new WebSocket('ws://127.0.0.1:8765/ws');
             
-            ws.onopen = () => {
+            window.ws.onopen = () => {
                 console.log('WebSocket connected');
             };
             
-            ws.onmessage = (event) => {
+            window.ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
                 handleMessage(data);
             };
             
-            ws.onclose = () => {
+            window.ws.onclose = () => {
                 console.log('WebSocket closed, reconnecting...');
                 setTimeout(connectWebSocket, 2000);
             };
             
-            ws.onerror = (error) => {
+            window.ws.onerror = (error) => {
                 console.error('WebSocket error:', error);
             };
         }
@@ -388,6 +612,11 @@
                     
                 case 'emotion':
                     targetEmotion = data.emotion || 'neutral';
+                    break;
+                    
+                case 'audio_analysis':
+                    // Audio data from Python system audio capture
+                    handleAudioAnalysis(data);
                     break;
             }
         }
@@ -422,23 +651,44 @@
                     0.1
                 );
                 
-                // Idle breathing/movement
-                if (!isPlayingVRMA) {
+                // Apply animation based on mode
+                const mode = window.companionMode || 'active';
+                
+                // Disable lookAt during dance (it overrides our bone rotations)
+                if (vrm.lookAt) {
+                    vrm.lookAt.autoUpdate = (mode !== 'dance_beat' && mode !== 'dance_full');
+                }
+                
+                if (mode === 'dance_beat') {
+                    // Beat-reactive procedural dance
+                    applyBeatDance(delta);
+                } else if (mode === 'dance_full') {
+                    if (isPlayingVRMA) {
+                        // VRMA animation - control playback based on audio
+                        updateDanceAudioControl();
+                    } else {
+                        // No VRMA loaded - fall back to more intense beat dance
+                        applyBeatDance(delta, true);  // true = intense mode
+                    }
+                } else if (!isPlayingVRMA) {
+                    // Idle animation for active/idle modes
                     applyIdleAnimation(delta);
                 }
                 
-                // Blinking
+                // Blinking (always)
                 updateBlink(delta);
                 
-                // Lip sync when speaking
-                if (isSpeaking) {
+                // Lip sync when speaking (only in active mode)
+                if (isSpeaking && mode === 'active') {
                     updateLipSync(delta);
-                } else {
+                } else if (!isSpeaking || mode !== 'active') {
                     resetMouth();
                 }
                 
-                // Emotion blending
-                updateEmotions(delta);
+                // Emotion blending (not during dance)
+                if (mode !== 'dance_beat' && mode !== 'dance_full') {
+                    updateEmotions(delta);
+                }
                 
                 // Update VRM
                 vrm.update(delta);
@@ -466,6 +716,413 @@
                 head.rotation.x += Math.sin(idleTime * 0.4 + headIdlePhase) * 0.001;
             }
         }
+        
+        // ============================================
+        // BEAT-REACTIVE DANCE (Mode: dance_beat)
+        // ============================================
+        function applyBeatDance(delta, intense = false) {
+            if (!vrm || !vrm.humanoid) return;
+            
+            // Intensity multiplier for dance_full mode - MUCH bigger difference!
+            const intenseMult = intense ? 2.5 : 1.0;
+            const speedMult = intense ? 2.0 : 1.0;
+            
+            // Update dance phases (MUCH faster in intense mode)
+            dancePhase += delta * 4 * speedMult;
+            headBobPhase += delta * 8 * speedMult;
+            armSwayPhase += delta * 3 * speedMult;
+            hipSwayPhase += delta * 2 * speedMult;
+            
+            // Smooth intensity based on audio - but always have baseline movement!
+            const audioIntensity = Math.min(1, (bassEnergy + midEnergy) * 2.0);  // More sensitive
+            danceIntensity = danceIntensity * 0.85 + audioIntensity * 0.15;  // Faster response
+            
+            // Base intensity ensures she dances even without music
+            // Audio makes it more reactive/energetic
+            const baseIntensity = (intense ? 0.7 : 0.5) * intenseMult;  // Higher base for full dance
+            const audioBoost = danceIntensity * 0.5 * intenseMult;
+            const effectiveIntensity = baseIntensity + audioBoost;
+            
+            // Get bones
+            const head = vrm.humanoid.getNormalizedBoneNode('head');
+            const neck = vrm.humanoid.getNormalizedBoneNode('neck');
+            const spine = vrm.humanoid.getNormalizedBoneNode('spine');
+            const chest = vrm.humanoid.getNormalizedBoneNode('chest');
+            const hips = vrm.humanoid.getNormalizedBoneNode('hips');
+            const leftUpperArm = vrm.humanoid.getNormalizedBoneNode('leftUpperArm');
+            const rightUpperArm = vrm.humanoid.getNormalizedBoneNode('rightUpperArm');
+            const leftLowerArm = vrm.humanoid.getNormalizedBoneNode('leftLowerArm');
+            const rightLowerArm = vrm.humanoid.getNormalizedBoneNode('rightLowerArm');
+            const leftShoulder = vrm.humanoid.getNormalizedBoneNode('leftShoulder');
+            const rightShoulder = vrm.humanoid.getNormalizedBoneNode('rightShoulder');
+            
+            // Head bob on bass
+            if (head) {
+                // Base bob amount + extra on beat
+                const baseBob = 0.08;  // Always bob a little
+                const beatBoost = isBeat ? 0.15 : bassEnergy * 0.1;
+                const bobAmount = (baseBob + beatBoost) * intenseMult;
+                head.rotation.x = -Math.abs(Math.sin(headBobPhase)) * bobAmount * effectiveIntensity;
+                head.rotation.z = Math.sin(dancePhase * 0.5) * 0.05 * intenseMult * effectiveIntensity;
+            }
+            
+            // Neck follows head slightly
+            if (neck) {
+                neck.rotation.x = Math.sin(headBobPhase + 0.2) * 0.03 * intenseMult * effectiveIntensity;
+            }
+            
+            // Spine/chest sway with mid frequencies
+            if (spine) {
+                spine.rotation.y = Math.sin(hipSwayPhase) * 0.08 * intenseMult * effectiveIntensity;
+                spine.rotation.x = Math.sin(dancePhase * 0.5) * 0.02 * intenseMult * effectiveIntensity;
+            }
+            
+            if (chest) {
+                chest.rotation.y = Math.sin(hipSwayPhase + 0.3) * 0.05 * intenseMult * effectiveIntensity;
+            }
+            
+            // Hip sway
+            if (hips) {
+                hips.rotation.y = Math.sin(hipSwayPhase) * 0.1 * intenseMult * effectiveIntensity;
+                hips.position.y = (hips.position.y || 0) + Math.sin(headBobPhase) * 0.005 * intenseMult * effectiveIntensity;
+            }
+            
+            // Arm movements - base sway + responsive to high frequencies
+            const baseArmSway = 0.5;  // Always have some arm movement
+            const audioArmBoost = highEnergy * 0.5;  // Audio adds more
+            const armEnergy = (baseArmSway + audioArmBoost) * effectiveIntensity;
+            
+            if (leftUpperArm) {
+                leftUpperArm.rotation.z = 1.2 + Math.sin(armSwayPhase) * 0.3 * armEnergy;
+                leftUpperArm.rotation.x = -Math.sin(armSwayPhase * 0.7) * 0.2 * armEnergy;
+                leftUpperArm.rotation.y = -1.0;  // Rotate arm forward (flipped)
+            }
+            
+            if (rightUpperArm) {
+                rightUpperArm.rotation.z = -1.2 - Math.sin(armSwayPhase + Math.PI) * 0.3 * armEnergy;
+                rightUpperArm.rotation.x = -Math.sin(armSwayPhase * 0.7 + 1) * 0.2 * armEnergy;
+                rightUpperArm.rotation.y = 1.0;  // Rotate arm forward (flipped)
+            }
+            
+            if (leftLowerArm) {
+                leftLowerArm.rotation.z = -0.3 - Math.sin(armSwayPhase * 1.5) * 0.2 * intenseMult * effectiveIntensity;
+            }
+            
+            if (rightLowerArm) {
+                rightLowerArm.rotation.z = 0.3 + Math.sin(armSwayPhase * 1.5) * 0.2 * intenseMult * effectiveIntensity;
+            }
+            
+            // Shoulder bounce on beats (X rotation for forward shrug)
+            if (leftShoulder && isBeat) {
+                leftShoulder.rotation.x = 0.08 * intenseMult;
+            } else if (leftShoulder) {
+                leftShoulder.rotation.x = leftShoulder.rotation.x * 0.85;
+            }
+            
+            if (rightShoulder && isBeat) {
+                rightShoulder.rotation.x = 0.08 * intenseMult;
+            } else if (rightShoulder) {
+                rightShoulder.rotation.x = rightShoulder.rotation.x * 0.85;
+            }
+            
+            // Happy expression while dancing (more happy in intense mode)
+            if (vrm.expressionManager) {
+                try {
+                    vrm.expressionManager.setValue('happy', 0.3 + effectiveIntensity * 0.4);
+                } catch(e) {}
+            }
+        }
+        
+        // ============================================
+        // FULL-BODY VRMA DANCE (Mode: dance_full)  
+        // ============================================
+        let currentDanceAnimation = null;
+        let danceAnimations = [];
+        
+        async function loadDanceAnimation(url) {
+            if (!VRMAnimationLoaderPlugin || !createVRMAnimationClip) {
+                console.warn('VRMA not supported - VRMAnimationLoaderPlugin:', VRMAnimationLoaderPlugin, 'createVRMAnimationClip:', createVRMAnimationClip);
+                return null;
+            }
+            
+            return new Promise((resolve, reject) => {
+                const animLoader = new GLTFLoader();
+                animLoader.register((parser) => new VRMAnimationLoaderPlugin(parser));
+                
+                console.log('Loading VRMA from:', url);
+                animLoader.load(url, (gltf) => {
+                    console.log('VRMA loaded, userData:', Object.keys(gltf.userData));
+                    
+                    // The API returns vrmAnimations (plural) as an array
+                    const vrmAnimations = gltf.userData.vrmAnimations;
+                    if (vrmAnimations && vrmAnimations.length > 0 && vrm) {
+                        const vrmAnimation = vrmAnimations[0];
+                        console.log('Found VRM animation, duration:', vrmAnimation.duration);
+                        const clip = createVRMAnimationClip(vrmAnimation, vrm);
+                        console.log('Created animation clip:', clip.name, 'duration:', clip.duration, 'tracks:', clip.tracks.length);
+                        loadedAnimations.set(url, clip);
+                        resolve(clip);
+                    } else {
+                        console.warn('No vrmAnimations found in:', gltf.userData);
+                        reject('No VRM animation found in file');
+                    }
+                }, 
+                (progress) => console.log('VRMA loading:', Math.round(progress.loaded/1024), 'KB'),
+                (error) => {
+                    console.error('VRMA load error:', error);
+                    reject(error);
+                });
+            });
+        }
+        
+        // Store the dance clip for audio-reactive control
+        let loadedDanceClip = null;
+        let danceAnimationPaused = true;  // Start paused until audio detected
+        const AUDIO_THRESHOLD = 0.05;  // Minimum energy to trigger dance
+        
+        function playDanceAnimation(clip) {
+            if (!mixer || !clip) return;
+            
+            if (currentAction) {
+                currentAction.fadeOut(0.5);
+            }
+            
+            loadedDanceClip = clip;
+            currentAction = mixer.clipAction(clip);
+            currentAction.reset();
+            currentAction.fadeIn(0.5);
+            currentAction.setLoop(THREE.LoopRepeat);
+            currentAction.paused = true;  // Start paused - will unpause when audio detected
+            currentAction.play();
+            danceAnimationPaused = true;
+            isPlayingVRMA = true;
+            console.log('🎵 Dance loaded and waiting for music...');
+        }
+        
+        // Control dance animation based on audio - called in render loop
+        function updateDanceAudioControl() {
+            if (!currentAction || !isPlayingVRMA || window.companionMode !== 'dance_full') return;
+            
+            const audioEnergy = bassEnergy + midEnergy;
+            const hasAudio = audioEnergy > AUDIO_THRESHOLD;
+            
+            if (hasAudio && danceAnimationPaused) {
+                // Start/resume dancing
+                currentAction.paused = false;
+                danceAnimationPaused = false;
+                console.log('🎶 Music detected! Dancing...');
+            } else if (!hasAudio && !danceAnimationPaused) {
+                // Pause dancing when music stops
+                currentAction.paused = true;
+                danceAnimationPaused = true;
+                console.log('🔇 Music stopped - waiting...');
+            }
+        }
+        
+        function stopDanceAnimation() {
+            if (currentAction) {
+                currentAction.fadeOut(0.5);
+                currentAction = null;
+            }
+            loadedDanceClip = null;
+            danceAnimationPaused = true;
+            isPlayingVRMA = false;
+            setupIdlePose();
+        }
+        
+        // Play FBX animation on VRM (retargets Mixamo bones to VRM bones)
+        function playFBXDance(clip) {
+            if (!mixer || !clip || !vrm) {
+                console.warn('Cannot play FBX: missing mixer, clip, or vrm');
+                return false;
+            }
+            
+            // Stop current animation
+            if (currentAction) {
+                currentAction.fadeOut(0.3);
+            }
+            
+            // Retarget Mixamo bones to VRM bones
+            const retargetedClip = retargetMixamoToVRM(clip, vrm);
+            if (!retargetedClip) {
+                console.warn('Could not retarget animation - falling back to beat dance');
+                isPlayingVRMA = false;  // Ensure fallback to beat dance
+                return false;
+            }
+            
+            try {
+                currentAction = mixer.clipAction(retargetedClip);
+                currentAction.reset();
+                currentAction.fadeIn(0.3);
+                currentAction.setLoop(THREE.LoopRepeat);
+                currentAction.play();
+                isPlayingVRMA = true;
+                console.log('Playing FBX dance:', clip.name);
+                return true;
+            } catch (e) {
+                console.error('Error playing FBX animation:', e);
+                isPlayingVRMA = false;
+                return false;
+            }
+        }
+        
+        // Retarget Mixamo animation to VRM skeleton
+        function retargetMixamoToVRM(clip, vrm) {
+            const mixamoToVRM = {
+                'mixamorigHips': 'hips',
+                'mixamorigSpine': 'spine',
+                'mixamorigSpine1': 'chest',
+                'mixamorigSpine2': 'upperChest',
+                'mixamorigNeck': 'neck',
+                'mixamorigHead': 'head',
+                'mixamorigLeftShoulder': 'leftShoulder',
+                'mixamorigLeftArm': 'leftUpperArm',
+                'mixamorigLeftForeArm': 'leftLowerArm',
+                'mixamorigLeftHand': 'leftHand',
+                'mixamorigRightShoulder': 'rightShoulder',
+                'mixamorigRightArm': 'rightUpperArm',
+                'mixamorigRightForeArm': 'rightLowerArm',
+                'mixamorigRightHand': 'rightHand',
+                'mixamorigLeftUpLeg': 'leftUpperLeg',
+                'mixamorigLeftLeg': 'leftLowerLeg',
+                'mixamorigLeftFoot': 'leftFoot',
+                'mixamorigLeftToeBase': 'leftToes',
+                'mixamorigRightUpLeg': 'rightUpperLeg',
+                'mixamorigRightLeg': 'rightLowerLeg',
+                'mixamorigRightFoot': 'rightFoot',
+                'mixamorigRightToeBase': 'rightToes'
+            };
+            
+            // Rotation corrections for Mixamo -> VRM bone orientation differences
+            // Mixamo Y-up, VRM also Y-up, but rest poses differ
+            const rotationCorrections = {
+                'hips': new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, 0)),
+                'leftUpperLeg': new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, Math.PI)),
+                'rightUpperLeg': new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, Math.PI)),
+                'leftLowerLeg': new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, 0)),
+                'rightLowerLeg': new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, 0)),
+                'leftUpperArm': new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, 0)),
+                'rightUpperArm': new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, 0)),
+            };
+            
+            const tracks = [];
+            
+            for (const track of clip.tracks) {
+                // Parse track name: "boneName.property"
+                const parts = track.name.split('.');
+                const boneName = parts[0];
+                const property = parts.slice(1).join('.');
+                
+                // Skip position tracks (they move the model off-screen)
+                // Only keep quaternion (rotation) tracks
+                if (property === 'position' || property.includes('position')) {
+                    continue;
+                }
+                
+                // Skip scale tracks too
+                if (property === 'scale' || property.includes('scale')) {
+                    continue;
+                }
+                
+                // Find VRM bone name
+                const vrmBoneName = mixamoToVRM[boneName];
+                if (!vrmBoneName) continue;
+                
+                // Get VRM bone node
+                const vrmBone = vrm.humanoid.getNormalizedBoneNode(vrmBoneName);
+                if (!vrmBone) continue;
+                
+                // Clone and rename track
+                const newTrack = track.clone();
+                newTrack.name = `${vrmBone.name}.${property}`;
+                
+                // Apply rotation correction if this is a quaternion track
+                if (property === 'quaternion' && rotationCorrections[vrmBoneName]) {
+                    const correction = rotationCorrections[vrmBoneName];
+                    const values = newTrack.values;
+                    const tempQuat = new THREE.Quaternion();
+                    
+                    for (let i = 0; i < values.length; i += 4) {
+                        tempQuat.set(values[i], values[i+1], values[i+2], values[i+3]);
+                        tempQuat.premultiply(correction);
+                        values[i] = tempQuat.x;
+                        values[i+1] = tempQuat.y;
+                        values[i+2] = tempQuat.z;
+                        values[i+3] = tempQuat.w;
+                    }
+                }
+                
+                tracks.push(newTrack);
+            }
+            
+            if (tracks.length === 0) {
+                console.warn('No tracks could be retargeted');
+                return null;
+            }
+            
+            console.log(`Retargeted ${tracks.length} rotation tracks`);
+            return new THREE.AnimationClip(clip.name + '_vrm', clip.duration, tracks);
+        }
+        
+        // Mode change handler
+        window.addEventListener('modeChange', async (e) => {
+            const mode = e.detail;
+            
+            if (mode === 'dance_full') {
+                console.log('=== DANCE_FULL MODE ACTIVATED ===');
+                console.log('VRMAnimationLoaderPlugin:', VRMAnimationLoaderPlugin ? 'loaded' : 'NOT LOADED');
+                console.log('createVRMAnimationClip:', createVRMAnimationClip ? 'loaded' : 'NOT LOADED');
+                
+                // Try to load and play the Shikanoko dance VRMA animation
+                const vrmaUrl = '/animations/shikanoko_dance.vrma';
+                console.log('🎵 dance_full: Loading VRMA animation from:', vrmaUrl);
+                
+                try {
+                    // Check if already loaded
+                    let clip = loadedAnimations.get(vrmaUrl);
+                    if (!clip) {
+                        console.log('Loading VRMA animation...');
+                        clip = await loadDanceAnimation(vrmaUrl);
+                    }
+                    
+                    if (clip) {
+                        console.log('✅ Playing Shikanoko dance animation!');
+                        console.log('   Duration:', clip.duration, 'seconds');
+                        console.log('   Tracks:', clip.tracks.length);
+                        playDanceAnimation(clip);
+                    } else {
+                        console.warn('❌ Failed to load VRMA - falling back to procedural dance');
+                    }
+                } catch (error) {
+                    console.error('❌ VRMA load error:', error);
+                    console.log('Falling back to procedural dance (1.8x intensity)');
+                }
+            } else if (mode !== 'dance_full' && isPlayingVRMA) {
+                stopDanceAnimation();
+            }
+            
+            // Note: Audio analyzer runs in Python and sends data via WebSocket
+            // No need to setup anything here - just start playing music on your PC!
+            if (mode === 'dance_beat' || mode === 'dance_full') {
+                console.log('Dance mode active! Play music in YouTube, Pandora, Spotify, etc.');
+                console.log('Annabeth will hear and dance to it!');
+            }
+        });
+        
+        // Expose function to load dance animations
+        window.loadDance = async function(url) {
+            try {
+                const clip = await loadDanceAnimation(url);
+                if (clip) {
+                    danceAnimations.push(clip);
+                    console.log('Dance animation loaded:', url);
+                    return true;
+                }
+            } catch (e) {
+                console.error('Failed to load dance:', e);
+            }
+            return false;
+        };
         
         function updateBlink(delta) {
             if (!vrm || !vrm.expressionManager) return;

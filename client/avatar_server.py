@@ -1,6 +1,7 @@
 """
 Avatar WebSocket Server
 Serves the VRM model and sends animation commands to the web frontend
+Includes system audio analysis for beat-reactive dancing
 """
 import asyncio
 import json
@@ -11,6 +12,41 @@ import aiohttp
 
 # Connected WebSocket clients
 clients = set()
+
+# Audio analyzer reference
+_audio_analyzer = None
+_audio_broadcast_task = None
+
+# Current companion mode (active, idle, dance_beat, dance_full)
+_current_mode = "active"
+
+# Chat silence state (separate from mode - can dance while silenced)
+_chat_silenced = False
+
+def get_current_mode():
+    """Get the current companion mode."""
+    return _current_mode
+
+def is_chat_silenced():
+    """Check if chat is silenced (S key toggle)."""
+    return _chat_silenced
+
+def set_chat_silenced(silenced: bool):
+    """Set chat silence state."""
+    global _chat_silenced
+    _chat_silenced = silenced
+    print(f"[Avatar] Chat silenced: {silenced}")
+
+def toggle_chat_silence():
+    """Toggle chat silence on/off."""
+    global _chat_silenced
+    _chat_silenced = not _chat_silenced
+    print(f"[Avatar] Chat silenced: {_chat_silenced}")
+    return _chat_silenced
+
+def is_listening_paused():
+    """Check if listening should be paused (silenced OR not in active mode)."""
+    return _chat_silenced or _current_mode != "active"
 
 async def websocket_handler(request):
     """Handle WebSocket connections from the avatar frontend"""
@@ -23,9 +59,18 @@ async def websocket_handler(request):
     try:
         async for msg in ws:
             if msg.type == aiohttp.WSMsgType.TEXT:
-                # Handle incoming messages from frontend if needed
+                # Handle incoming messages from frontend
                 data = json.loads(msg.data)
-                print(f"[Avatar] Received: {data}")
+                if data.get('type') == 'mode_change':
+                    global _current_mode
+                    _current_mode = data.get('mode', 'active')
+                    print(f"[Avatar] Mode changed to: {_current_mode}")
+                elif data.get('type') == 'toggle_silence':
+                    toggle_chat_silence()
+                elif data.get('type') == 'set_silence':
+                    set_chat_silenced(data.get('silenced', False))
+                else:
+                    print(f"[Avatar] Received: {data}")
             elif msg.type == aiohttp.WSMsgType.ERROR:
                 print(f"[Avatar] WebSocket error: {ws.exception()}")
     finally:
@@ -69,6 +114,66 @@ async def set_emotion(emotion: str):
         "type": "emotion",
         "emotion": emotion
     })
+
+
+async def send_audio_data(data: dict):
+    """Send audio analysis data to all clients"""
+    await broadcast({
+        "type": "audio_analysis",
+        **data
+    })
+
+
+async def _audio_broadcast_loop():
+    """Continuously broadcast audio analysis data"""
+    global _audio_analyzer
+    
+    while True:
+        if _audio_analyzer and clients:
+            analysis = _audio_analyzer.get_analysis()
+            await send_audio_data(analysis)
+        await asyncio.sleep(0.033)  # ~30 FPS
+
+
+def start_audio_analyzer():
+    """Start the system audio analyzer"""
+    global _audio_analyzer, _audio_broadcast_task
+    
+    try:
+        # Import from the same directory
+        import sys
+        from pathlib import Path
+        client_dir = Path(__file__).parent
+        if str(client_dir) not in sys.path:
+            sys.path.insert(0, str(client_dir))
+        
+        from audio_analyzer import SystemAudioAnalyzer
+        
+        _audio_analyzer = SystemAudioAnalyzer()
+        if _audio_analyzer.start():
+            print("[Avatar] System audio analyzer started")
+            return True
+        else:
+            print("[Avatar] Failed to start audio analyzer (no loopback device)")
+            return False
+    except ImportError as e:
+        print(f"[Avatar] Audio analyzer not available: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+    except Exception as e:
+        print(f"[Avatar] Error starting audio analyzer: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+def stop_audio_analyzer():
+    """Stop the audio analyzer"""
+    global _audio_analyzer
+    if _audio_analyzer:
+        _audio_analyzer.stop()
+        _audio_analyzer = None
 
 
 async def index_handler(request):
@@ -138,8 +243,15 @@ _server_task = None
 
 async def start_avatar_server():
     """Start the avatar server (call from main_chat.py)"""
-    global _server_runner
+    global _server_runner, _audio_broadcast_task
     _server_runner = await run_server()
+    
+    # Start audio analyzer
+    start_audio_analyzer()
+    
+    # Start audio broadcast loop
+    _audio_broadcast_task = asyncio.create_task(_audio_broadcast_loop())
+    
     return _server_runner
 
 
@@ -149,7 +261,15 @@ def get_avatar_api():
         'speak_start': speak_start,
         'speak_end': speak_end,
         'set_emotion': set_emotion,
-        'broadcast': broadcast
+        'broadcast': broadcast,
+        'send_audio_data': send_audio_data,
+        'start_audio_analyzer': start_audio_analyzer,
+        'stop_audio_analyzer': stop_audio_analyzer,
+        'get_current_mode': get_current_mode,
+        'is_listening_paused': is_listening_paused,
+        'is_chat_silenced': is_chat_silenced,
+        'toggle_chat_silence': toggle_chat_silence,
+        'set_chat_silenced': set_chat_silenced
     }
 
 

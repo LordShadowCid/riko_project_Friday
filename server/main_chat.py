@@ -72,6 +72,13 @@ def avatar_speak_end():
         )
 
 
+def is_listening_paused():
+    """Check if listening should be paused (dance/idle modes)"""
+    if avatar_api and 'is_listening_paused' in avatar_api:
+        return avatar_api['is_listening_paused']()
+    return False
+
+
 def _prepare_whisper_model_source(model_name: str) -> str:
     """Ensure Faster-Whisper model is loadable on Windows without symlink privileges.
 
@@ -309,6 +316,13 @@ bg_listener = BackgroundListener(
 )
 
 while True:
+    # Check if we should pause listening (dance/idle modes or silenced)
+    paused = is_listening_paused()
+    if paused:
+        print("[Main] Listening paused - waiting...", end='\r')
+        time.sleep(0.5)  # Check again in 500ms
+        continue
+    
     conversation_recording = Path("audio") / "conversation.wav"
     conversation_recording.parent.mkdir(parents=True, exist_ok=True)
 
