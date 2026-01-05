@@ -16,7 +16,7 @@ from server.process.asr_func.asr_vad import (
 )
 from server.process.llm_funcs.llm_scr import llm_response, llm_response_streaming
 from server.process.tts_func.sovits_ping import sovits_gen, play_audio
-from server.process.read_aloud.text_capture import estimate_word_timings
+from server.process.read_aloud.text_capture import estimate_word_timings, capture_selected_text
 from pathlib import Path
 import os
 import sys
@@ -560,6 +560,32 @@ while True:
             continue
 
         # =====================================================================
+        # CHECK FOR READ-ALOUD INTENT
+        # =====================================================================
+        # Detect if user wants to read selected text
+        read_intent_phrases = [
+            "read that", "read this", "read the selected", "read selected",
+            "read it", "read aloud", "read to me", "read what i selected",
+            "read the text", "can you read", "please read"
+        ]
+        user_lower = user_spoken_text.lower().strip()
+        is_read_intent = any(phrase in user_lower for phrase in read_intent_phrases)
+        
+        if is_read_intent:
+            print("[ReadAloud] Detected read intent - capturing text...")
+            captured_text = capture_selected_text(restore_clipboard=True)
+            
+            if captured_text and len(captured_text) > 5:
+                print(f"[ReadAloud] Captured {len(captured_text)} characters")
+                read_aloud = get_read_aloud_manager()
+                read_aloud.start_reading(captured_text)
+                # Go back to top of loop to process the queue
+                continue
+            else:
+                print("[ReadAloud] No text captured - make sure text is selected!")
+                # Let LLM respond about the failure
+
+        # =====================================================================
         # CHECK FOR READ-ALOUD Q&A CONTEXT
         # =====================================================================
         # If read-aloud is paused, add context about what was being read
@@ -579,7 +605,7 @@ while True:
             llm_input = f"{qa_context}\n\nThe user's question: {user_spoken_text}"
 
         # Use streaming for faster response - speak each sentence as it arrives
-        # Pipeline: LLM generates → TTS synthesizes → Audio plays (all overlapped)
+        # Pipeline: LLM generates -> TTS synthesizes -> Audio plays (all overlapped)
         print("Annabeth: ", end="", flush=True)
         
         sentence_queue = queue.Queue()
