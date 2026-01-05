@@ -16,6 +16,7 @@ from server.process.asr_func.asr_vad import (
 )
 from server.process.llm_funcs.llm_scr import llm_response, llm_response_streaming
 from server.process.tts_func.sovits_ping import sovits_gen, play_audio
+from server.process.read_aloud.text_capture import estimate_word_timings
 from pathlib import Path
 import os
 import sys
@@ -39,6 +40,7 @@ from shared import (
     CompanionMode,
     get_config,
     get_companion_state,
+    get_read_aloud_manager,
 )
 
 # Get shared instances
@@ -248,6 +250,130 @@ def clean_text_for_tts(text: str) -> str:
     return text
 
 
+# =============================================================================
+# READ ALOUD FUNCTIONALITY
+# =============================================================================
+
+def process_read_aloud_queue(output_device, bg_listener) -> bool:
+    """
+    Process pending read-aloud sentences.
+    
+    Returns True if read-aloud was processed, False otherwise.
+    """
+    try:
+        read_aloud = get_read_aloud_manager()
+    except Exception:
+        return False
+    
+    if not read_aloud.state.is_reading:
+        return False
+    
+    print("\n[ReadAloud] 📖 Reading selected text...")
+    audio_dir = _shared_config.paths.audio_dir
+    sentence_idx = 0
+    
+    while read_aloud.state.is_reading:
+        # Get next sentence
+        sentence = read_aloud.get_next_sentence()
+        
+        if sentence is None:
+            # Either paused or done
+            if read_aloud.state.is_paused:
+                print("\n[ReadAloud] ⏸️ Paused - ask questions or press R to resume")
+                return True  # Let main loop handle Q&A
+            break
+        
+        # Clean and speak the sentence
+        cleaned = clean_text_for_tts(sentence)
+        if not cleaned:
+            read_aloud.state.current_index += 1
+            continue
+        
+        print(f"  📖 {cleaned}")
+        
+        # Send highlight data to browser clients (approx timings)
+        try:
+            duration_estimate = max(len(cleaned.split()) * 0.35, 1.0)  # rough estimate
+            word_timings = [
+                {"word": w, "start": s, "end": e}
+                for (w, s, e) in estimate_word_timings(cleaned, duration_estimate)
+            ]
+            if avatar_api and avatar_loop:
+                asyncio.run_coroutine_threadsafe(
+                    avatar_api.get('send_read_highlight')(cleaned, word_timings, sentence_idx),
+                    avatar_loop,
+                )
+        except Exception as e:
+            print(f"[ReadAloud] Highlight send failed: {e}")
+        
+        # Generate TTS
+        uid = uuid.uuid4().hex
+        output_path = audio_dir / f"read_{uid}.wav"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        gen_path = sovits_gen(cleaned, output_path)
+        if not gen_path:
+            print("  (TTS failed for this sentence)")
+            read_aloud.state.current_index += 1
+            continue
+        
+        # Notify avatar
+        avatar_speak_start(cleaned)
+        
+        # Start background listener for interruption
+        get_interrupt_flag().clear()
+        get_speaking_flag().set()
+        bg_listener.start()
+        
+        # Play audio
+        was_interrupted = not play_audio(
+            output_path,
+            output_device=output_device,
+            interrupt_flag=get_interrupt_flag(),
+        )
+        
+        # Stop listener
+        bg_listener.stop()
+        get_speaking_flag().clear()
+        
+        # Cleanup
+        try:
+            output_path.unlink()
+        except Exception:
+            pass
+        
+        if was_interrupted:
+            # User interrupted - request pause
+            read_aloud.request_pause()
+            print("\n[ReadAloud] ⏸️ Interrupted - finishing sentence...")
+            # Complete the pause
+            read_aloud.state.complete_pause()
+            print("[ReadAloud] ⏸️ Paused - ask questions or press R to resume")
+            avatar_speak_end()
+            try:
+                if avatar_api and avatar_loop:
+                    asyncio.run_coroutine_threadsafe(avatar_api.get('send_read_clear')(), avatar_loop)
+            except Exception:
+                pass
+            return True
+        
+        # Advance to next sentence
+        read_aloud.state.current_index += 1
+        sentence_idx += 1
+    
+    avatar_speak_end()
+    try:
+        if avatar_api and avatar_loop:
+            asyncio.run_coroutine_threadsafe(avatar_api.get('send_read_clear')(), avatar_loop)
+    except Exception:
+        pass
+    
+    if not read_aloud.state.is_paused:
+        print("[ReadAloud] ✅ Finished reading")
+    
+    return True
+
+
 print(' \n ========= Starting Chat... ================ \n')
 
 # Start avatar server
@@ -344,6 +470,27 @@ bg_listener = BackgroundListener(
 )
 
 while True:
+    # =========================================================================
+    # CHECK FOR READ-ALOUD QUEUE
+    # =========================================================================
+    # Process any pending read-aloud sentences before checking for new input
+    try:
+        if process_read_aloud_queue(output_device, bg_listener):
+            # Read-aloud was processed
+            read_aloud = get_read_aloud_manager()
+            if read_aloud.state.is_paused:
+                # Stay in loop - user can ask questions via voice
+                # Continue below to normal voice input handling
+                pass
+            else:
+                # Reading complete, go back to normal loop
+                continue
+    except Exception as e:
+        print(f"[ReadAloud] Error: {e}")
+    
+    # =========================================================================
+    # CHECK PAUSE STATE
+    # =========================================================================
     # Check if we should pause listening (dance/idle modes or silenced)
     paused = is_listening_paused()
     if paused:
@@ -410,6 +557,25 @@ while True:
             print("No transcription captured; try again.")
             continue
 
+        # =====================================================================
+        # CHECK FOR READ-ALOUD Q&A CONTEXT
+        # =====================================================================
+        # If read-aloud is paused, add context about what was being read
+        qa_context = ""
+        try:
+            read_aloud = get_read_aloud_manager()
+            if read_aloud.state.is_paused:
+                qa_context = read_aloud.get_qa_context()
+                if qa_context:
+                    print("[ReadAloud] 💬 Answering question about the text...")
+        except Exception:
+            pass
+        
+        # Combine Q&A context with user input if available
+        llm_input = user_spoken_text
+        if qa_context:
+            llm_input = f"{qa_context}\n\nThe user's question: {user_spoken_text}"
+
         # Use streaming for faster response - speak each sentence as it arrives
         # Pipeline: LLM generates → TTS synthesizes → Audio plays (all overlapped)
         print("Annabeth: ", end="", flush=True)
@@ -428,7 +594,7 @@ while True:
         def run_llm():
             """Run LLM in background thread."""
             try:
-                llm_response_streaming(user_spoken_text, on_sentence=on_sentence, speaker_name=speaker_name)
+                llm_response_streaming(llm_input, on_sentence=on_sentence, speaker_name=speaker_name)
             finally:
                 llm_done.set()
                 sentence_queue.put(None)  # Signal end

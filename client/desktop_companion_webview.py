@@ -285,8 +285,11 @@ class DesktopCompanionWindow(QMainWindow):
             self._toggle_dance()
         elif event.key() == Qt.Key.Key_S:
             # S key = toggle silence (pause chat listening/responding)
-            print("[S KEY] Toggling silence...")
-            self._toggle_silence()
+            # Also pauses read-aloud if currently reading
+            self._handle_s_key()
+        elif event.key() == Qt.Key.Key_R:
+            # R key = resume read-aloud if paused
+            self._handle_r_key()
         elif event.key() == Qt.Key.Key_1:
             # 1 = Active mode
             self._set_mode(CompanionMode.ACTIVE)
@@ -333,6 +336,44 @@ class DesktopCompanionWindow(QMainWindow):
         """
         self.web_view.page().runJavaScript(js_code, lambda result: print(f"[Silence] WebSocket: {result}"))
     
+    def _handle_s_key(self):
+        """Handle S key - pause read-aloud if reading, otherwise toggle silence."""
+        try:
+            from server.process.read_aloud import get_read_aloud_manager
+            read_aloud = get_read_aloud_manager()
+            
+            if read_aloud.state.is_reading:
+                # Currently reading - request pause
+                read_aloud.request_pause()
+                print("[S KEY] Pausing read-aloud...")
+                return
+        except ImportError:
+            pass
+        except Exception as e:
+            print(f"[S KEY] Error checking read-aloud: {e}")
+        
+        # Not reading - normal silence toggle
+        print("[S KEY] Toggling silence...")
+        self._toggle_silence()
+    
+    def _handle_r_key(self):
+        """Handle R key - resume read-aloud if paused."""
+        try:
+            from server.process.read_aloud import get_read_aloud_manager
+            read_aloud = get_read_aloud_manager()
+            
+            if read_aloud.state.is_paused:
+                print("[R KEY] Resuming read-aloud...")
+                read_aloud.resume()
+                return
+        except ImportError:
+            pass
+        except Exception as e:
+            print(f"[R KEY] Error: {e}")
+        
+        # Not paused - no action
+        print("[R KEY] Not currently paused")
+    
     def _toggle_active(self):
         """Toggle between active and idle."""
         if self.bridge.current_mode == CompanionMode.ACTIVE:
@@ -376,12 +417,24 @@ class HotkeyManager(QObject):
         super().__init__()
         self.bridge = bridge
         self.hotkeys = []
+        self._read_aloud_manager = None  # Lazy loaded
         
         # Connect signal to slot for thread-safe execution
         self.hotkeyPressed.connect(self._handle_hotkey)
         
         if HAS_KEYBOARD:
             self._register_hotkeys()
+    
+    def _get_read_aloud_manager(self):
+        """Lazy load the read-aloud manager."""
+        if self._read_aloud_manager is None:
+            try:
+                from server.process.read_aloud import get_read_aloud_manager
+                self._read_aloud_manager = get_read_aloud_manager()
+            except ImportError as e:
+                print(f"[ReadAloud] Could not import read_aloud module: {e}")
+                return None
+        return self._read_aloud_manager
     
     def _register_hotkeys(self):
         """Register global hotkeys."""
@@ -397,10 +450,15 @@ class HotkeyManager(QObject):
         keyboard.add_hotkey('ctrl+shift+m', lambda: self.hotkeyPressed.emit('cycle_modes'))
         self.hotkeys.append('ctrl+shift+m')
         
+        # Ctrl+Shift+R: Read selected text aloud
+        keyboard.add_hotkey('ctrl+shift+r', lambda: self.hotkeyPressed.emit('read_aloud'))
+        self.hotkeys.append('ctrl+shift+r')
+        
         print("Global hotkeys registered:")
         print("  Ctrl+Shift+A: Toggle Active/Idle")
         print("  Ctrl+Shift+D: Toggle Dance modes")
         print("  Ctrl+Shift+M: Cycle all modes")
+        print("  Ctrl+Shift+R: Read selected text aloud")
     
     def _handle_hotkey(self, action):
         """Handle hotkey action on the main thread (slot)."""
@@ -410,6 +468,20 @@ class HotkeyManager(QObject):
             self._toggle_dance()
         elif action == 'cycle_modes':
             self._cycle_modes()
+        elif action == 'read_aloud':
+            self._trigger_read_aloud()
+    
+    def _trigger_read_aloud(self):
+        """Trigger read-aloud for selected text."""
+        manager = self._get_read_aloud_manager()
+        if manager is None:
+            print("[ReadAloud] Manager not available")
+            return
+        
+        if manager.capture_and_read():
+            print("[ReadAloud] Started reading selected text")
+        else:
+            print("[ReadAloud] No text captured or already reading")
     
     def _toggle_active(self):
         """Toggle between active and idle."""
@@ -490,12 +562,19 @@ def main():
     print("Desktop Companion (WebEngine)")
     print("=" * 50)
     print("Controls (when window focused):")
-    print("  S: Toggle chat silence (mute listening)")
+    print("  S: Toggle silence / Pause read-aloud")
+    print("  R: Resume read-aloud")
     print("  D: Toggle dance modes")
     print("  1-4: Quick mode select")
     print("  Space: Cycle all modes")
     print("  F5: Reload page")
     print("  ESC: Close")
+    print("-" * 50)
+    print("Global hotkeys (work anywhere):")
+    print("  Ctrl+Shift+R: Read selected text aloud")
+    print("  Ctrl+Shift+A: Toggle Active/Idle")
+    print("  Ctrl+Shift+D: Toggle Dance modes")
+    print("  Ctrl+Shift+M: Cycle all modes")
     print("-" * 50)
     print("Right-click + drag: Move window")
     print("=" * 50)

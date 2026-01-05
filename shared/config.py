@@ -34,6 +34,8 @@ class MessageType(str, Enum):
     SPEAK_END = "speak_end"
     EMOTION = "emotion"
     AUDIO_ANALYSIS = "audio_analysis"
+    READ_HIGHLIGHT = "read_highlight"  # Highlight word/sentence during read-aloud
+    READ_CLEAR = "read_clear"          # Clear highlights
 
 
 class Emotion(str, Enum):

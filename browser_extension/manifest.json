@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Annabeth Read-Aloud Highlighter",
+  "description": "Highlights words while Annabeth reads aloud.",
+  "version": "0.1.0",
+  "permissions": ["tabs", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {}
+}

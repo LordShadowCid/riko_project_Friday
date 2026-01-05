@@ -233,3 +233,17 @@ def reset_state() -> None:
     global _companion_state, _audio_state
     _companion_state = None
     _audio_state = None
+
+
+# =============================================================================
+# READ ALOUD STATE ACCESS
+# =============================================================================
+
+def get_read_aloud_manager():
+    """
+    Get the ReadAloudManager instance.
+    
+    Lazy import to avoid circular dependencies.
+    """
+    from server.process.read_aloud import get_read_aloud_manager as _get_manager
+    return _get_manager()

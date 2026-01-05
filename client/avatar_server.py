@@ -146,6 +146,23 @@ async def send_audio_data(data: Dict[str, Any]) -> None:
     })
 
 
+async def send_read_highlight(sentence: str, word_timings: list, sentence_index: int = 0) -> None:
+    """Send read-aloud highlight data to all clients (browser extension)."""
+    await broadcast({
+        "type": MessageType.READ_HIGHLIGHT.value,
+        "sentence": sentence,
+        "sentence_index": sentence_index,
+        "word_timings": word_timings,
+    })
+
+
+async def send_read_clear() -> None:
+    """Clear read-aloud highlights."""
+    await broadcast({
+        "type": MessageType.READ_CLEAR.value,
+    })
+
+
 async def _audio_broadcast_loop() -> None:
     """Continuously broadcast audio analysis data"""
     global _audio_analyzer
@@ -291,6 +308,8 @@ def get_avatar_api() -> Dict[str, Any]:
         'set_emotion': set_emotion,
         'broadcast': broadcast,
         'send_audio_data': send_audio_data,
+        'send_read_highlight': send_read_highlight,
+        'send_read_clear': send_read_clear,
         'start_audio_analyzer': start_audio_analyzer,
         'stop_audio_analyzer': stop_audio_analyzer,
         'get_current_mode': get_current_mode,

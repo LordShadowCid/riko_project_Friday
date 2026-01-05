@@ -31,6 +31,7 @@ from .state import (
     get_companion_state,
     get_audio_state,
     reset_state,
+    get_read_aloud_manager,
 )
 
 __all__ = [
@@ -57,4 +58,5 @@ __all__ = [
     "get_companion_state",
     "get_audio_state",
     "reset_state",
+    "get_read_aloud_manager",
 ]
