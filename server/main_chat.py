@@ -578,7 +578,7 @@ while True:
             if captured_text and len(captured_text) > 5:
                 print(f"[ReadAloud] Captured {len(captured_text)} characters")
                 read_aloud = get_read_aloud_manager()
-                read_aloud.start_reading(captured_text)
+                read_aloud.state.start_reading(captured_text)
                 # Go back to top of loop to process the queue
                 continue
             else:

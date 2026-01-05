@@ -48,7 +48,7 @@ class CompanionState:
         if callback and old_mode != value:
             callback(value)
         
-        print(f"[State] Mode changed: {old_mode.value} → {value.value}")
+        print(f"[State] Mode changed: {old_mode.value} -> {value.value}")
     
     @property
     def silenced(self) -> bool:
@@ -67,7 +67,7 @@ class CompanionState:
         if callback and old_value != value:
             callback(value)
         
-        status = "🔇 SILENCED" if value else "🔊 LISTENING"
+        status = "[MUTED] SILENCED" if value else "[UNMUTED] LISTENING"
         print(f"[State] Chat: {status}")
     
     def toggle_silence(self) -> bool:
@@ -80,7 +80,7 @@ class CompanionState:
         if callback:
             callback(new_value)
         
-        status = "🔇 SILENCED" if new_value else "🔊 LISTENING"
+        status = "[MUTED] SILENCED" if new_value else "[UNMUTED] LISTENING"
         print(f"[State] Chat: {status}")
         return new_value
     

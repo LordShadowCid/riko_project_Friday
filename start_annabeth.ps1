@@ -4,6 +4,9 @@
 $ProjectRoot = "c:\Users\blakd\OneDrive\Desktop\Anabeth"
 $VenvPython = "$ProjectRoot\.venv\Scripts\python.exe"
 
+# Add cuDNN to PATH for GPU-accelerated Whisper
+$env:PATH = "$ProjectRoot\.venv\Lib\site-packages\nvidia\cudnn\bin;$ProjectRoot\.venv\Lib\site-packages\nvidia\cublas\bin;$env:PATH"
+
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Starting Annabeth Desktop Companion  " -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
