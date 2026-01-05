@@ -286,7 +286,8 @@ def process_read_aloud_queue(output_device, bg_listener) -> bool:
         # Clean and speak the sentence
         cleaned = clean_text_for_tts(sentence)
         if not cleaned:
-            read_aloud.state.current_index += 1
+            # Empty after cleanup - skip to next
+            read_aloud.state.advance_index()
             continue
         
         print(f"  📖 {cleaned}")
@@ -314,7 +315,8 @@ def process_read_aloud_queue(output_device, bg_listener) -> bool:
         gen_path = sovits_gen(cleaned, output_path)
         if not gen_path:
             print("  (TTS failed for this sentence)")
-            read_aloud.state.current_index += 1
+            # Skip to next sentence
+            read_aloud.state.advance_index()
             continue
         
         # Notify avatar
@@ -358,7 +360,7 @@ def process_read_aloud_queue(output_device, bg_listener) -> bool:
             return True
         
         # Advance to next sentence
-        read_aloud.state.current_index += 1
+        read_aloud.state.advance_index()
         sentence_idx += 1
     
     avatar_speak_end()

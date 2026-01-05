@@ -76,9 +76,13 @@
 
     // Schedule highlights
     clearTimers();
-    wordTimings.forEach((timing) => {
+    wordTimings.forEach((timing, timingIdx) => {
       const { word, start, end } = timing;
-      const idx = words.findIndex((w) => w.replace(/[^\w']/g, '') === word.replace(/[^\w']/g, ''));
+      // Normalize for matching: lowercase, strip punctuation
+      const normalize = (s) => s.toLowerCase().replace(/[^\w']/g, '');
+      let idx = words.findIndex((w) => normalize(w) === normalize(word));
+      // Fallback: use timing index if word match fails but index is valid
+      if (idx === -1 && timingIdx < words.length) idx = timingIdx;
       if (idx === -1) return;
       const startMs = Math.max(0, start * 1000);
       const endMs = Math.max(startMs + 50, end * 1000);

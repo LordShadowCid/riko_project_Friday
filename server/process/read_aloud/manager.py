@@ -119,6 +119,20 @@ class ReadAloudState:
             self._status = ReadAloudStatus.READING
         print(f"[ReadAloud] Starting to read {len(sentences)} sentences")
     
+    def advance_index(self) -> bool:
+        """
+        Advance to next sentence index.
+        
+        Returns:
+            True if there are more sentences, False if reading is complete.
+        """
+        with self._lock:
+            self._current_index += 1
+            if self._current_index >= len(self._sentences):
+                self._status = ReadAloudStatus.IDLE
+                return False
+            return True
+    
     def advance(self) -> Optional[str]:
         """Move to next sentence and return it, or None if done."""
         with self._lock:
@@ -148,9 +162,9 @@ class ReadAloudState:
         with self._lock:
             if self._status == ReadAloudStatus.PAUSED:
                 self._status = ReadAloudStatus.READING
+                print("[ReadAloud] Resuming reading")
                 if self._current_index < len(self._sentences):
                     return self._sentences[self._current_index]
-        print("[ReadAloud] Resuming reading")
         return None
     
     def stop(self) -> None:
@@ -238,17 +252,16 @@ class ReadAloudManager:
         Get the next sentence to read.
         
         Handles pause requests - returns None if pausing.
+        NOTE: This returns the current sentence. The caller is responsible
+        for advancing the index after processing (via state.current_index += 1).
         """
         # Check if pause was requested
         if self.state.pause_requested:
             self.state.complete_pause()
             return None
         
-        # Get current or advance to next
-        if self.state.current_index == 0:
-            sentence = self.state.current_sentence
-        else:
-            sentence = self.state.advance()
+        # Return current sentence (caller advances index after processing)
+        sentence = self.state.current_sentence
         
         if sentence is None:
             # Reading complete
@@ -316,7 +329,7 @@ if __name__ == "__main__":
             print(f"Reading: {sentence}")
             # Simulate TTS delay
             time.sleep(0.5)
-            manager.state.current_index += 1
+            # Note: get_next_sentence handles index advancement internally
         else:
             break
     
