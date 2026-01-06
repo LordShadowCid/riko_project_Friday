@@ -89,6 +89,35 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
                     
                 elif msg_type == MessageType.SET_SILENCE.value:
                     set_chat_silenced(data.get('silenced', False))
+                
+                elif msg_type == MessageType.READ_PAUSE.value:
+                    # Q key pressed - pause read-aloud immediately
+                    try:
+                        from shared import get_read_aloud_manager
+                        from server.process.asr_func.asr_vad import get_interrupt_flag
+                        read_aloud = get_read_aloud_manager()
+                        if read_aloud.state.is_reading:
+                            # Set interrupt flag to stop audio playback immediately
+                            get_interrupt_flag().set()
+                            read_aloud.request_pause()
+                            print("[Avatar] 📖 Read-aloud pause requested + audio interrupted (Q key)")
+                        else:
+                            print("[Avatar] 📖 Not currently reading")
+                    except Exception as e:
+                        print(f"[Avatar] Read pause error: {e}")
+                
+                elif msg_type == MessageType.READ_RESUME.value:
+                    # R key pressed - resume read-aloud
+                    try:
+                        from shared import get_read_aloud_manager
+                        read_aloud = get_read_aloud_manager()
+                        if read_aloud.state.is_paused:
+                            read_aloud.resume()
+                            print("[Avatar] 📖 Read-aloud resumed (R key)")
+                        else:
+                            print("[Avatar] 📖 Not currently paused")
+                    except Exception as e:
+                        print(f"[Avatar] Read resume error: {e}")
                     
                 else:
                     print(f"[Avatar] Received: {data}")

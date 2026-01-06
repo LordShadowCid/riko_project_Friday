@@ -256,7 +256,10 @@ def clean_text_for_tts(text: str) -> str:
 
 def process_read_aloud_queue(output_device, bg_listener) -> bool:
     """
-    Process pending read-aloud sentences.
+    Process pending read-aloud sentences with pre-buffering.
+    
+    Uses a background thread to pre-generate TTS for the NEXT sentence
+    while the current one is playing, eliminating gaps.
     
     Returns True if read-aloud was processed, False otherwise.
     """
@@ -272,29 +275,94 @@ def process_read_aloud_queue(output_device, bg_listener) -> bool:
     audio_dir = _shared_config.paths.audio_dir
     sentence_idx = 0
     
-    while read_aloud.state.is_reading:
-        # Get next sentence
-        sentence = read_aloud.get_next_sentence()
+    # Pre-buffer queue: holds (sentence, audio_path) for next sentence
+    next_audio = [None]  # [0] = (cleaned_text, audio_path) or None
+    prefetch_thread = [None]
+    prefetch_lock = threading.Lock()
+    
+    def prefetch_next_sentence(idx: int):
+        """Pre-generate TTS for the next sentence in background."""
+        import time as _time
+        _prefetch_start = _time.time()
         
-        if sentence is None:
-            # Either paused or done
-            if read_aloud.state.is_paused:
-                print("\n[ReadAloud] ⏸️ Paused - ask questions or press R to resume")
-                return True  # Let main loop handle Q&A
-            break
+        # Get sentence at idx (without advancing state)
+        sentences = read_aloud.state.sentences
+        if idx >= len(sentences):
+            with prefetch_lock:
+                next_audio[0] = None
+            print(f"  [Prefetch] Sentence {idx}: no more sentences")
+            return
         
-        # Clean and speak the sentence
+        sentence = sentences[idx]
         cleaned = clean_text_for_tts(sentence)
         if not cleaned:
-            # Empty after cleanup - skip to next
+            with prefetch_lock:
+                next_audio[0] = ('', None)  # Empty sentence
+            print(f"  [Prefetch] Sentence {idx}: empty after cleaning")
+            return
+        
+        # Generate TTS
+        uid = uuid.uuid4().hex
+        output_path = audio_dir / f"read_prefetch_{uid}.wav"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        gen_path = sovits_gen(cleaned, output_path)
+        _prefetch_elapsed = _time.time() - _prefetch_start
+        
+        with prefetch_lock:
+            if gen_path:
+                next_audio[0] = (cleaned, output_path)
+                print(f"  [Prefetch] Sentence {idx}: TTS ready in {_prefetch_elapsed:.2f}s")
+            else:
+                next_audio[0] = (cleaned, None)  # TTS failed
+                print(f"  [Prefetch] Sentence {idx}: TTS FAILED after {_prefetch_elapsed:.2f}s")
+    
+    # Start prefetching first sentence
+    first_idx = read_aloud.state.current_index
+    prefetch_thread[0] = threading.Thread(target=prefetch_next_sentence, args=(first_idx,), daemon=True)
+    prefetch_thread[0].start()
+    
+    while read_aloud.state.is_reading:
+        # Check for pause request
+        if read_aloud.state.pause_requested:
+            read_aloud.state.complete_pause()
+            print("\n[ReadAloud] ⏸️ Paused - ask questions or press R to resume")
+            return True
+        
+        # Wait for prefetched audio
+        import time as _time
+        _wait_start = _time.time()
+        if prefetch_thread[0]:
+            prefetch_thread[0].join(timeout=30)  # Max wait 30s
+        _wait_elapsed = _time.time() - _wait_start
+        
+        with prefetch_lock:
+            prefetched = next_audio[0]
+            next_audio[0] = None
+        
+        if _wait_elapsed > 0.1:
+            print(f"  [ReadAloud] ⏳ Waited {_wait_elapsed:.2f}s for TTS prefetch")
+        
+        if prefetched is None:
+            # No more sentences
+            break
+        
+        cleaned, output_path = prefetched
+        
+        if not cleaned:
+            # Empty sentence - advance and continue
             read_aloud.state.advance_index()
+            # Start prefetch for next
+            next_idx = read_aloud.state.current_index
+            prefetch_thread[0] = threading.Thread(target=prefetch_next_sentence, args=(next_idx,), daemon=True)
+            prefetch_thread[0].start()
             continue
         
         print(f"  📖 {cleaned}")
         
-        # Send highlight data to browser clients (approx timings)
+        # Send highlight data to browser clients
         try:
-            duration_estimate = max(len(cleaned.split()) * 0.35, 1.0)  # rough estimate
+            duration_estimate = max(len(cleaned.split()) * 0.35, 1.0)
             word_timings = [
                 {"word": w, "start": s, "end": e}
                 for (w, s, e) in estimate_word_timings(cleaned, duration_estimate)
@@ -307,16 +375,13 @@ def process_read_aloud_queue(output_device, bg_listener) -> bool:
         except Exception as e:
             print(f"[ReadAloud] Highlight send failed: {e}")
         
-        # Generate TTS
-        uid = uuid.uuid4().hex
-        output_path = audio_dir / f"read_{uid}.wav"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        gen_path = sovits_gen(cleaned, output_path)
-        if not gen_path:
+        if output_path is None:
             print("  (TTS failed for this sentence)")
-            # Skip to next sentence
             read_aloud.state.advance_index()
+            # Start prefetch for next
+            next_idx = read_aloud.state.current_index
+            prefetch_thread[0] = threading.Thread(target=prefetch_next_sentence, args=(next_idx,), daemon=True)
+            prefetch_thread[0].start()
             continue
         
         # Notify avatar
@@ -327,7 +392,12 @@ def process_read_aloud_queue(output_device, bg_listener) -> bool:
         get_speaking_flag().set()
         bg_listener.start()
         
-        # Play audio
+        # START PREFETCH FOR NEXT SENTENCE (runs in parallel with playback!)
+        next_idx = read_aloud.state.current_index + 1
+        prefetch_thread[0] = threading.Thread(target=prefetch_next_sentence, args=(next_idx,), daemon=True)
+        prefetch_thread[0].start()
+        
+        # Play audio (while next is being generated)
         was_interrupted = not play_audio(
             output_path,
             output_device=output_device,
@@ -338,7 +408,7 @@ def process_read_aloud_queue(output_device, bg_listener) -> bool:
         bg_listener.stop()
         get_speaking_flag().clear()
         
-        # Cleanup
+        # Cleanup this audio file
         try:
             output_path.unlink()
         except Exception:
@@ -348,10 +418,17 @@ def process_read_aloud_queue(output_device, bg_listener) -> bool:
             # User interrupted - request pause
             read_aloud.request_pause()
             print("\n[ReadAloud] ⏸️ Interrupted - finishing sentence...")
-            # Complete the pause
             read_aloud.state.complete_pause()
             print("[ReadAloud] ⏸️ Paused - ask questions or press R to resume")
             avatar_speak_end()
+            # Clean up prefetched audio if any
+            with prefetch_lock:
+                if next_audio[0] and next_audio[0][1]:
+                    try:
+                        Path(next_audio[0][1]).unlink()
+                    except Exception:
+                        pass
+                next_audio[0] = None
             try:
                 if avatar_api and avatar_loop:
                     asyncio.run_coroutine_threadsafe(avatar_api.get('send_read_clear')(), avatar_loop)
@@ -498,7 +575,7 @@ while True:
     if paused:
         # Use spaces to clear the line when overwriting with \r
         print("[Main] Listening paused - waiting...          ", end='\r', flush=True)
-        time.sleep(0.5)  # Check again in 500ms
+        time.sleep(0.1)  # Check again in 100ms (faster S key response)
         continue
     
     # Clear the "waiting" message when resuming
@@ -509,12 +586,16 @@ while True:
     conversation_recording.parent.mkdir(parents=True, exist_ok=True)
 
     output_wav_path = None
+    
+    # Timing diagnostics
+    t_start = time.time()
 
     try:
         # Clear any previous interrupt flags
         get_interrupt_flag().clear()
         
         speaker_name = None
+        t_record_start = time.time()
         try:
             if use_vad:
                 # Hands-free VAD-based recording with speaker identification
@@ -558,6 +639,10 @@ while True:
         if not user_spoken_text:
             print("No transcription captured; try again.")
             continue
+        
+        # Timing: record + transcribe complete
+        t_transcribe_done = time.time()
+        print(f"⏱️ [Timing] Record+Transcribe: {t_transcribe_done - t_record_start:.2f}s")
 
         # =====================================================================
         # CHECK FOR READ-ALOUD INTENT
@@ -608,6 +693,11 @@ while True:
         # Pipeline: LLM generates -> TTS synthesizes -> Audio plays (all overlapped)
         print("Annabeth: ", end="", flush=True)
         
+        # Timing for LLM
+        t_llm_start = time.time()
+        t_first_sentence = [None]  # Use list to capture from closure
+        t_first_audio = [None]
+        
         sentence_queue = queue.Queue()
         audio_queue = queue.Queue()  # Queue of (sentence, audio_path) tuples
         full_response = []
@@ -616,6 +706,8 @@ while True:
         
         def on_sentence(sentence: str):
             """Called for each sentence from the LLM."""
+            if t_first_sentence[0] is None:
+                t_first_sentence[0] = time.time()
             full_response.append(sentence)
             sentence_queue.put(sentence)
         
@@ -684,6 +776,13 @@ while True:
                 break
             
             sentence, output_wav_path = item
+            
+            # Timing: first audio ready to play
+            if t_first_audio[0] is None:
+                t_first_audio[0] = time.time()
+                # Print timing summary
+                if t_first_sentence[0]:
+                    print(f"\n⏱️ [Timing] LLM first sentence: {t_first_sentence[0] - t_llm_start:.2f}s, TTS: {t_first_audio[0] - t_first_sentence[0]:.2f}s, Total to audio: {t_first_audio[0] - t_start:.2f}s")
             
             # Print the sentence
             if first_sentence:

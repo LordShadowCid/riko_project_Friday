@@ -114,8 +114,8 @@ presets:
 sovits_ping_config:
   text_lang: en
   prompt_lang : en
-  # For Docker GPT-SoVITS, this should be a Linux path inside the container.
-  # The provided docker-compose mounts ./character_files to /data/ref
-  ref_audio_path : /data/ref/main_sample.wav
+  # For native Windows GPT-SoVITS: use Windows path
+  # For Docker GPT-SoVITS: use Linux path like /data/ref/main_sample.wav
+  ref_audio_path : character_files/main_sample.wav
   prompt_text : This is a sample voice for you to just get started with because it sounds kind of cute but just make sure this doesn't have long silences.
   

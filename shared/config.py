@@ -28,6 +28,8 @@ class MessageType(str, Enum):
     MODE_CHANGE = "mode_change"
     TOGGLE_SILENCE = "toggle_silence"
     SET_SILENCE = "set_silence"
+    READ_PAUSE = "read_pause"      # Q key - pause read-aloud to ask question
+    READ_RESUME = "read_resume"    # R key - resume read-aloud
     
     # Server -> Client
     SPEAK_START = "speak_start"

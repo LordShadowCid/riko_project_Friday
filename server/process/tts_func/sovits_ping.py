@@ -8,6 +8,18 @@ from server.annabeth_config import load_config, resolve_repo_path
 
 char_config = load_config()
 
+# HTTP session for connection pooling (reuses TCP connections for faster requests)
+_tts_session: requests.Session = None
+
+def _get_tts_session() -> requests.Session:
+    """Get or create a persistent HTTP session for TTS requests."""
+    global _tts_session
+    if _tts_session is None:
+        _tts_session = requests.Session()
+        # Set default timeout
+        _tts_session.headers.update({'Content-Type': 'application/json'})
+    return _tts_session
+
 
 def _resolve_device(device, kind='input'):
     """Resolve a sounddevice input/output device selector.
@@ -116,7 +128,9 @@ def sovits_gen(in_text, output_wav_pth = "output.wav"):
     }
 
     try:
-        response = requests.post(url, json=payload, timeout=30)
+        # Use session pooling for faster connection reuse
+        session = _get_tts_session()
+        response = session.post(url, json=payload, timeout=30)
         response.raise_for_status()  # throws if not 200
 
         # Save the response audio if it's binary

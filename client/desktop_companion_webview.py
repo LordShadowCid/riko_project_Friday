@@ -284,9 +284,11 @@ class DesktopCompanionWindow(QMainWindow):
             # D key = toggle dance mode
             self._toggle_dance()
         elif event.key() == Qt.Key.Key_S:
-            # S key = toggle silence (pause chat listening/responding)
-            # Also pauses read-aloud if currently reading
-            self._handle_s_key()
+            # S key = toggle silence (mute/unmute chat)
+            self._toggle_silence()
+        elif event.key() == Qt.Key.Key_Q:
+            # Q key = pause read-aloud to ask a Question
+            self._handle_q_key()
         elif event.key() == Qt.Key.Key_R:
             # R key = resume read-aloud if paused
             self._handle_r_key()
@@ -336,43 +338,39 @@ class DesktopCompanionWindow(QMainWindow):
         """
         self.web_view.page().runJavaScript(js_code, lambda result: print(f"[Silence] WebSocket: {result}"))
     
-    def _handle_s_key(self):
-        """Handle S key - pause read-aloud if reading, otherwise toggle silence."""
-        try:
-            from server.process.read_aloud import get_read_aloud_manager
-            read_aloud = get_read_aloud_manager()
-            
-            if read_aloud.state.is_reading:
-                # Currently reading - request pause
-                read_aloud.request_pause()
-                print("[S KEY] Pausing read-aloud...")
-                return
-        except ImportError:
-            pass
-        except Exception as e:
-            print(f"[S KEY] Error checking read-aloud: {e}")
-        
-        # Not reading - normal silence toggle
-        print("[S KEY] Toggling silence...")
-        self._toggle_silence()
+    def _handle_q_key(self):
+        """Handle Q key - pause read-aloud to ask a Question."""
+        print("[Q KEY] Requesting read-aloud pause...")
+        js_code = """
+            (function() {
+                if (window.ws && window.ws.readyState === WebSocket.OPEN) {
+                    window.ws.send(JSON.stringify({ type: 'read_pause' }));
+                    console.log('✅ Sent read_pause to server');
+                    return 'sent';
+                } else {
+                    console.log('❌ WebSocket not connected');
+                    return 'not_connected';
+                }
+            })();
+        """
+        self.web_view.page().runJavaScript(js_code, lambda result: print(f"[Q KEY] WebSocket: {result}"))
     
     def _handle_r_key(self):
         """Handle R key - resume read-aloud if paused."""
-        try:
-            from server.process.read_aloud import get_read_aloud_manager
-            read_aloud = get_read_aloud_manager()
-            
-            if read_aloud.state.is_paused:
-                print("[R KEY] Resuming read-aloud...")
-                read_aloud.resume()
-                return
-        except ImportError:
-            pass
-        except Exception as e:
-            print(f"[R KEY] Error: {e}")
-        
-        # Not paused - no action
-        print("[R KEY] Not currently paused")
+        print("[R KEY] Requesting read-aloud resume...")
+        js_code = """
+            (function() {
+                if (window.ws && window.ws.readyState === WebSocket.OPEN) {
+                    window.ws.send(JSON.stringify({ type: 'read_resume' }));
+                    console.log('✅ Sent read_resume to server');
+                    return 'sent';
+                } else {
+                    console.log('❌ WebSocket not connected');
+                    return 'not_connected';
+                }
+            })();
+        """
+        self.web_view.page().runJavaScript(js_code, lambda result: print(f"[R KEY] WebSocket: {result}"))
     
     def _toggle_active(self):
         """Toggle between active and idle."""
