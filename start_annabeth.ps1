@@ -1,9 +1,13 @@
 # Annabeth Desktop Companion - Full Startup Script
 # Run this from PowerShell to start everything
+# Usage: .\start_annabeth.ps1           (Unity frontend - default)
+#        .\start_annabeth.ps1 -Legacy   (PyQt6 WebView frontend)
+param([switch]$Legacy)
 
 $ProjectRoot = "c:\Users\blakd\OneDrive\Desktop\Anabeth"
 $VenvPython = "$ProjectRoot\.venv\Scripts\python.exe"
 $GPT_SOVITS_PYTHON = "$ProjectRoot\third_party\GPT-SoVITS\.venv\Scripts\python.exe"
+$UnityBuild = "C:\Users\blakd\unit\Builds\AnnabethTest\Annabeth.exe"
 
 # Add cuDNN to PATH for GPU-accelerated Whisper
 $env:PATH = "$ProjectRoot\.venv\Lib\site-packages\nvidia\cudnn\bin;$ProjectRoot\.venv\Lib\site-packages\nvidia\cublas\bin;$env:PATH"
@@ -48,18 +52,35 @@ Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$ProjectRoot'
 Write-Host "Waiting for chat server (5 seconds)..." -ForegroundColor Gray
 Start-Sleep -Seconds 5
 
-# 3. Start Desktop Companion (Avatar + Audio)
-Write-Host "`n[3/3] Starting Desktop Companion..." -ForegroundColor Yellow
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$ProjectRoot\client'; & '$VenvPython' desktop_companion_webview.py"
+# 3. Start Frontend (Unity or Legacy PyQt6)
+if ($Legacy) {
+    Write-Host "`n[3/3] Starting Desktop Companion (PyQt6 Legacy)..." -ForegroundColor Yellow
+    Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$ProjectRoot\client'; & '$VenvPython' desktop_companion_webview.py"
+} else {
+    Write-Host "`n[3/3] Starting Desktop Companion (Unity)..." -ForegroundColor Yellow
+    if (Test-Path $UnityBuild) {
+        Start-Process $UnityBuild
+    } else {
+        Write-Host "Unity build not found at: $UnityBuild" -ForegroundColor Red
+        Write-Host "Build from Unity: Annabeth > Build Standalone, or use -Legacy flag" -ForegroundColor Yellow
+        Write-Host "Falling back to PyQt6..." -ForegroundColor Yellow
+        Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$ProjectRoot\client'; & '$VenvPython' desktop_companion_webview.py"
+    }
+}
 
 Write-Host "`n========================================" -ForegroundColor Green
 Write-Host "  Annabeth is starting up!             " -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host "`nControls (when companion window focused):"
+Write-Host "  1     - Active mode"
+Write-Host "  2     - Idle mode"
+Write-Host "  3     - Procedural dance"
+Write-Host "  4     - Shikanoko dance"
 Write-Host "  S     - Toggle chat silence"
 Write-Host "  D     - Cycle dance modes"
-Write-Host "  1-4   - Quick mode select"
-Write-Host "  Space - Cycle all modes"
-Write-Host "  F5    - Reload avatar"
-Write-Host "  ESC   - Close companion"
-Write-Host "`nClose all 3 PowerShell windows to shut down."
+Write-Host "  Q     - Pause read-aloud"
+Write-Host "  R     - Resume read-aloud"
+Write-Host "  Space - Interrupt"
+Write-Host "  F1    - Toggle debug overlay"
+Write-Host "  Ctrl+Shift+X - Interrupt speech (global)"
+Write-Host "`nClose all windows to shut down."
