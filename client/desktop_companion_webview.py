@@ -319,7 +319,7 @@ class DesktopCompanionWindow(QMainWindow):
         """Toggle chat silence (S key) - pauses listening/responding."""
         # Toggle local state first for immediate UI feedback
         self.bridge.chat_silenced = not getattr(self.bridge, 'chat_silenced', False)
-        status = "🔇 SILENCED" if self.bridge.chat_silenced else "🔊 LISTENING"
+        status = "[MUTED] SILENCED" if self.bridge.chat_silenced else "[ACTIVE] LISTENING"
         print(f"Chat: {status}")
         
         # Send toggle_silence message to server via WebSocket

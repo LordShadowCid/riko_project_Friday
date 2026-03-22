@@ -1,29 +1,33 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 using Annabeth.Core;
 
 namespace Annabeth.Input
 {
     /// <summary>
     /// Handles keyboard input for controlling the companion.
-    /// Maps hotkeys to actions (matching the Python/JavaScript implementation).
+    /// Maps hotkeys to actions (matching the Python client key mappings).
+    /// Keys: 1=Active, 2=Idle, 3=Beat Dance, 4=Shikanoko Dance,
+    ///        D=Cycle Dance, S=Silence, Q=Read Pause, R=Read Resume,
+    ///        Space=Interrupt, Esc=Idle
     /// </summary>
     public class HotkeyManager : MonoBehaviour
     {
         [Header("References")]
+        [SerializeField] private CompanionManager companionManager;
         [SerializeField] private MessageHandler messageHandler;
 
         [Header("Settings")]
         [SerializeField] private bool globalHotkeysEnabled = true;
 
-        // Current dance style (for cycling)
         private DanceStyle _currentDanceStyle = DanceStyle.None;
 
         private void Start()
         {
+            if (companionManager == null)
+                companionManager = FindFirstObjectByType<CompanionManager>();
             if (messageHandler == null)
-            {
-                messageHandler = FindObjectOfType<MessageHandler>();
-            }
+                messageHandler = FindFirstObjectByType<MessageHandler>();
         }
 
         private void Update()
@@ -33,103 +37,101 @@ namespace Annabeth.Input
 
         private void HandleHotkeys()
         {
-            // Check for modifier keys
-            bool ctrl = UnityEngine.Input.GetKey(KeyCode.LeftControl) || UnityEngine.Input.GetKey(KeyCode.RightControl);
-            bool shift = UnityEngine.Input.GetKey(KeyCode.LeftShift) || UnityEngine.Input.GetKey(KeyCode.RightShift);
+            var kb = Keyboard.current;
+            if (kb == null) return;
+
+            bool ctrl = kb.leftCtrlKey.isPressed || kb.rightCtrlKey.isPressed;
+            bool shift = kb.leftShiftKey.isPressed || kb.rightShiftKey.isPressed;
 
             // Global hotkeys (Ctrl+Shift+Key)
             if (globalHotkeysEnabled && ctrl && shift)
             {
-                // Ctrl+Shift+R - Read aloud (OCR capture)
-                if (UnityEngine.Input.GetKeyDown(KeyCode.R))
+                if (kb.rKey.wasPressedThisFrame)
                 {
                     messageHandler?.SendHotkey("read_aloud");
                     Debug.Log("[HotkeyManager] Read aloud triggered");
                 }
                 
-                // Ctrl+Shift+A - Toggle active mode
-                if (UnityEngine.Input.GetKeyDown(KeyCode.A))
+                if (kb.aKey.wasPressedThisFrame)
                 {
-                    messageHandler?.SendModeChange(CompanionMode.Active);
+                    companionManager?.SetMode(CompanionMode.Active);
                     Debug.Log("[HotkeyManager] Active mode triggered");
                 }
                 
-                // Ctrl+Shift+D - Toggle dance mode
-                if (UnityEngine.Input.GetKeyDown(KeyCode.D))
+                if (kb.dKey.wasPressedThisFrame)
                 {
                     CycleDanceStyle();
                 }
                 
-                // Ctrl+Shift+M - Toggle mute/silence
-                if (UnityEngine.Input.GetKeyDown(KeyCode.M))
+                if (kb.mKey.wasPressedThisFrame)
                 {
-                    messageHandler?.SendSilenceToggle();
+                    companionManager?.ToggleSilence();
                     Debug.Log("[HotkeyManager] Silence toggled");
                 }
                 
-                return; // Don't process regular keys if modifiers held
+                return;
             }
 
             // Regular hotkeys (when window focused)
-            
-            // D - Cycle dance style
-            if (UnityEngine.Input.GetKeyDown(KeyCode.D))
-            {
+            if (kb.dKey.wasPressedThisFrame)
                 CycleDanceStyle();
-            }
 
-            // S - Toggle silence
-            if (UnityEngine.Input.GetKeyDown(KeyCode.S))
+            if (kb.sKey.wasPressedThisFrame)
             {
-                messageHandler?.SendSilenceToggle();
+                companionManager?.ToggleSilence();
                 Debug.Log("[HotkeyManager] Silence toggled");
             }
 
-            // Q - Pause read-aloud
-            if (UnityEngine.Input.GetKeyDown(KeyCode.Q))
+            if (kb.qKey.wasPressedThisFrame)
             {
                 messageHandler?.SendReadPause();
                 Debug.Log("[HotkeyManager] Read-aloud paused");
             }
 
-            // R - Resume read-aloud
-            if (UnityEngine.Input.GetKeyDown(KeyCode.R))
+            if (kb.rKey.wasPressedThisFrame)
             {
                 messageHandler?.SendReadResume();
                 Debug.Log("[HotkeyManager] Read-aloud resumed");
             }
 
-            // Number keys 1-4 for mode selection
-            if (UnityEngine.Input.GetKeyDown(KeyCode.Alpha1))
+            // 1 = Active mode
+            if (kb.digit1Key.wasPressedThisFrame)
             {
                 _currentDanceStyle = DanceStyle.None;
-                messageHandler?.SendDanceStyle(DanceStyle.None);
-                Debug.Log("[HotkeyManager] Dance: None");
+                companionManager?.SetMode(CompanionMode.Active);
+                Debug.Log("[HotkeyManager] Mode: Active");
             }
-            if (UnityEngine.Input.GetKeyDown(KeyCode.Alpha2))
+            // 2 = Idle mode
+            if (kb.digit2Key.wasPressedThisFrame)
+            {
+                _currentDanceStyle = DanceStyle.None;
+                companionManager?.SetMode(CompanionMode.Idle);
+                Debug.Log("[HotkeyManager] Mode: Idle");
+            }
+            // 3 = Beat-reactive procedural dance (dance_beat)
+            if (kb.digit3Key.wasPressedThisFrame)
             {
                 _currentDanceStyle = DanceStyle.Procedural;
-                messageHandler?.SendDanceStyle(DanceStyle.Procedural);
-                Debug.Log("[HotkeyManager] Dance: Procedural");
+                companionManager?.StartDance(DanceStyle.Procedural);
+                Debug.Log("[HotkeyManager] Dance: Procedural (Beat)");
             }
-            if (UnityEngine.Input.GetKeyDown(KeyCode.Alpha3))
+            // 4 = Shikanoko VRMA dance (dance_full)
+            if (kb.digit4Key.wasPressedThisFrame)
             {
                 _currentDanceStyle = DanceStyle.ShikanokoDance;
-                messageHandler?.SendDanceStyle(DanceStyle.ShikanokoDance);
-                Debug.Log("[HotkeyManager] Dance: Shikanoko");
+                companionManager?.StartDance(DanceStyle.ShikanokoDance);
+                Debug.Log("[HotkeyManager] Dance: Shikanoko (Full)");
             }
 
-            // Space - Interrupt/stop current action
-            if (UnityEngine.Input.GetKeyDown(KeyCode.Space))
+            if (kb.spaceKey.wasPressedThisFrame)
             {
                 messageHandler?.SendHotkey("interrupt");
                 Debug.Log("[HotkeyManager] Interrupt");
             }
 
-            // Escape - Return to idle
-            if (UnityEngine.Input.GetKeyDown(KeyCode.Escape))
+            if (kb.escapeKey.wasPressedThisFrame)
             {
-                messageHandler?.SendModeChange(CompanionMode.Idle);
+                companionManager?.SetMode(CompanionMode.Idle);
                 Debug.Log("[HotkeyManager] Return to idle");
             }
         }
@@ -137,13 +139,19 @@ namespace Annabeth.Input
         private void CycleDanceStyle()
         {
             _currentDanceStyle = (DanceStyle)(((int)_currentDanceStyle + 1) % 3);
-            messageHandler?.SendDanceStyle(_currentDanceStyle);
+
+            if (_currentDanceStyle == DanceStyle.None)
+            {
+                companionManager?.SetMode(CompanionMode.Active);
+            }
+            else
+            {
+                companionManager?.StartDance(_currentDanceStyle);
+            }
+
             Debug.Log($"[HotkeyManager] Dance style: {_currentDanceStyle}");
         }
 
-        /// <summary>
-        /// Enable or disable global hotkeys.
-        /// </summary>
         public void SetGlobalHotkeysEnabled(bool enabled)
         {
             globalHotkeysEnabled = enabled;

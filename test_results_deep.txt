@@ -1,0 +1,164 @@
+############################################################
+#  ANNABETH DEEP TEST SUITE
+#  2026-03-22 10:59:17
+############################################################
+
+============================================================
+  TEST 1: Configuration & Environment
+============================================================
+  [PASS] character_config.yaml loads
+  [PASS] Tools enabled in config
+  [PASS] System prompt present — 1404 chars
+  [PASS] Ollama settings loaded — model=mannix/llama3.1-8b-abliterated, num_ctx=3072
+
+============================================================
+  TEST 2: Ollama Connectivity
+============================================================
+  [PASS] Ollama reachable — 3 models loaded
+  [PASS] Model 'mannix/llama3.1-8b-abliterated' available
+  [PASS] Quick generation works — 5.9s, got 7 chars: 'TEST_OK'
+
+============================================================
+  TEST 3: TTS (GPT-SoVITS) Connectivity
+============================================================
+  [PASS] TTS server reachable — status=404
+  [PASS] TTS synthesis works — 1.0s, 189484 bytes audio
+
+============================================================
+  TEST 4: Gibberish Detector
+============================================================
+  [PASS] Good text not flagged — Hey senpai, what's up? I'm doing great today!
+  [PASS] Good text not flagged — The time is currently 3:45 PM Mountain Time.
+  [PASS] Good text not flagged — Oh great, you want me to say pineapple again? Fine
+  [PASS] Good text not flagged — My favorite GPU would probably be the RTX 4090 for
+  [PASS] Bad text flagged — th/at si/nk i/n wh/iLl e/whil-e I ann*w'er thee/me
+  [PASS] Bad text flagged — &amp;#39;hello &amp; world &amp;quot;test&amp;#x27
+  [PASS] Bad text flagged — tHeLeTs KeEp ThIe gOiNg FoReVeR UnTiL wE
+  [PASS] Bad text flagged — superlongwordwithnospacesanditjustkeepsgoingandgoi
+
+============================================================
+  TEST 5: Repetition Detector
+============================================================
+  [PASS] Exact duplicate detected
+  [PASS] Near-duplicate detected
+  [PASS] Different text not flagged
+  [WARN] Accumulated-prefix NOT detected by repetition check (prefix strip should handle)
+
+============================================================
+  TEST 6: Response Sanitizer
+============================================================
+  [PASS] HTML entities decoded — Hello & world <3 it's great
+  [PASS] Asterisk actions stripped — Hey there
+  [PASS] Long text truncated — 602 chars
+
+============================================================
+  TEST 7: History Deduplication
+============================================================
+  [PASS] Dedup removed duplicate — 1 assistant msgs remain
+  [PASS] Non-duplicates preserved — 2 assistant msgs kept
+
+============================================================
+  TEST 8: Accumulated Prefix Stripper
+============================================================
+  [PASS] Prefix stripped successfully — 'And haha, still thinking about pineapples? Yeah, sure thing....'
+  [PASS] Unique text not stripped
+
+============================================================
+  TEST 9: Tool Calling
+============================================================
+  [PASS] Time tool works — [Current time] It's Sunday, March 22, 2026 at 10:59 AM.
+  [PASS] Remember tool works — [Memory stored] Remembered: Remember that my favorite color is blue
+  [PASS] Recall tool works — [Retrieved memories]
+- Remember that my favorite color is blue
+- Remember that m
+
+============================================================
+  TEST 10: Memory Store (ChromaDB)
+============================================================
+  [PASS] ChromaDB connected — conversations=83, facts=7
+  [PASS] add_conversation works — conv_1774198771093
+  [PASS] recall_conversations works — User said: [Dad]: What type of GPU do you think would be bes
+  [PASS] recall_all works — 3 results
+
+============================================================
+  TEST 13: Self-Evaluation System
+============================================================
+  [PASS] self_eval module imports
+  [PASS] self_eval DB accessible — 115 evaluations stored
+  [PASS] Recent eval averages: help=2.9 char=4.9 len=3.0
+
+============================================================
+  TEST 14: Personality System
+============================================================
+  [PASS] Personality loaded — {'verbosity': 3, 'snarkiness': 4, 'formality': 2}
+  [PASS]   verbosity=3 (valid range)
+  [PASS]   snarkiness=4 (valid range)
+  [PASS]   formality=2 (valid range)
+
+============================================================
+  TEST 15: Streaming Infrastructure
+============================================================
+  [PASS] Streaming yielded 2 sentences in 5.6s
+  [PASS] First sentence: 'Hello!'
+
+============================================================
+  TEST 16: WebSocket Server
+============================================================
+  [PASS] WebSocket/HTTP server reachable at :8765
+
+============================================================
+  TEST 11: Multi-Turn LLM Response Uniqueness
+============================================================
+  Sending 8 diverse questions to the LLM pipeline...
+  This is the critical test for the repeat bug.
+
+  --- Turn 1: "Hello Annabeth, how are you doing today?"
+  Response (3.5s): Ugh, not this again... Another day of bossing around and fixing all sorts of chaos in our world! Just kidding, sorta. Hi...
+
+  --- Turn 2: "What is your favorite kind of food?"
+  Response (14.1s): Uh-huh, another roundabout way asking after someone else... Nice try though, senpai! So, since we've had this convo befo...
+
+  --- Turn 3: "Can you say the word watermelon for me?"
+  Response (14.0s): Uh-huh, another roundabout way asking after someone else. Nice try though, senpai! So, since we've had this convo before...
+  [!] REPEAT detected against prior responses
+
+  --- Turn 4: "What do you think about space exploration?"
+  Response (13.7s): Uh-huh, another roundabout way asking after someone else. Nice try though, senpai! So, since we’ve already covered inter...
+  [!] REPEAT detected against prior responses
+
+  --- Turn 5: "If you could have any superpower, what would it be?"
+  Response (15.1s): [Ugh, déjà vu much?] Oh yeah, been there done that, ain't gonna go over it... AGAIN. Let's move on, shall we, master? Ne...
+
+  --- Turn 6: "Tell me a fun fact about dolphins."
+  Response (16.7s): [Ugh, déjà vu much?] Oh yeah, been there done that, ain't gonna go over it.AGAIN.Oh yeah, so basically, because my memor...
+
+  --- Turn 7: "What would you name a pet cat?"
+  Response (15.8s): [Ugh, déjà vu much?] Oh yeah, been there done that, ain’t gonna go over it again. Make sense.Let’s move on, shall we, ma...
+  [!] REPEAT detected against prior responses
+
+  --- Turn 8: "What is two plus two?"
+  Response (15.0s): Ugh, finally getting away from those existential crises for now... *sigh* Fine, even math whizzes need reminding sometim...
+
+  --- Uniqueness Summary ---
+  [FAIL] 3/8 turns were repeats — Repeat problem persists
+  [PASS] No gibberish detected in any response
+  [PASS] Average LLM response time: 13.5s
+  [FAIL] Response opener variety: 4/8 unique prefixes — Model stuck on same opener
+
+============================================================
+  TEST 12: History File Integrity
+============================================================
+  [PASS] History loaded — 14 messages
+  [PASS] System prompt is first message
+  [WARN] Some consecutive user messages: max 2 in a row — Some repeat-skips happened
+  [PASS] No duplicate assistant responses in history
+
+============================================================
+  FINAL SUMMARY
+============================================================
+  PASS: 49
+  FAIL: 2
+  WARN: 2
+  Total: 53
+
+  [FAIL] 2 FAILURES detected - review above

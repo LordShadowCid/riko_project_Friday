@@ -38,6 +38,7 @@ class MessageType(str, Enum):
     AUDIO_ANALYSIS = "audio_analysis"
     READ_HIGHLIGHT = "read_highlight"  # Highlight word/sentence during read-aloud
     READ_CLEAR = "read_clear"          # Clear highlights
+    DEBUG_STATUS = "debug_status"      # Debug info for overlay (ASR text, status, etc.)
 
 
 class Emotion(str, Enum):

@@ -181,6 +181,12 @@ class SystemAudioAnalyzer:
                 if self.on_analysis_update:
                     self.on_analysis_update(self.get_analysis())
                     
+            except OSError as e:
+                # Stream closed (-9988) or device error — stop the loop
+                if self.running:
+                    print(f"[Audio] Stream closed, stopping capture: {e}")
+                self.running = False
+                break
             except Exception as e:
                 if self.running:
                     print(f"[Audio] Capture error: {e}")
@@ -203,11 +209,18 @@ class SystemAudioAnalyzer:
         mid_mask = (freqs >= 250) & (freqs < 2000)
         high_mask = freqs >= 2000
         
-        # Calculate raw energy in each band - boosted for better sensitivity
-        # User uses BCC950 ConferenceCam as only audio device
-        raw_bass = np.sqrt(np.mean(fft[bass_mask]**2)) * 80 if np.any(bass_mask) else 0
-        raw_mid = np.sqrt(np.mean(fft[mid_mask]**2)) * 60 if np.any(mid_mask) else 0
-        raw_high = np.sqrt(np.mean(fft[high_mask]**2)) * 40 if np.any(high_mask) else 0
+        # Calculate raw energy in each band
+        # Reduced multipliers from 80/60/40 to prevent ambient noise from
+        # registering as music (was causing avatar to dance with no audio).
+        raw_bass = np.sqrt(np.mean(fft[bass_mask]**2)) * 20 if np.any(bass_mask) else 0
+        raw_mid = np.sqrt(np.mean(fft[mid_mask]**2)) * 15 if np.any(mid_mask) else 0
+        raw_high = np.sqrt(np.mean(fft[high_mask]**2)) * 10 if np.any(high_mask) else 0
+        
+        # Noise gate: zero out energy below ambient noise floor
+        noise_floor = 0.02
+        if raw_bass < noise_floor: raw_bass = 0.0
+        if raw_mid < noise_floor: raw_mid = 0.0
+        if raw_high < noise_floor: raw_high = 0.0
         
         # Smooth
         self.smooth_bass = self.smooth_bass * (1 - self.smooth_factor) + raw_bass * self.smooth_factor
@@ -271,7 +284,7 @@ if __name__ == "__main__":
             filled = int(v * width)
             return '█' * filled + '░' * (width - filled)
         
-        beat_marker = " ♪ BEAT! ♪" if data['beat'] else ""
+        beat_marker = " * BEAT! *" if data['beat'] else ""
         print(f"\rBass: {bar(data['bass'])} | Mid: {bar(data['mid'])} | High: {bar(data['high'])}{beat_marker}    ", end='', flush=True)
     
     analyzer.on_analysis_update = print_analysis

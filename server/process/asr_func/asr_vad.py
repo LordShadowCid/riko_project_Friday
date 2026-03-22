@@ -13,6 +13,8 @@ import soundfile as sf
 import webrtcvad
 from typing import Tuple, Optional
 
+from server.utils import resolve_device as _resolve_device
+
 # Batched inference for long audio (>10 seconds)
 _batched_pipeline = None
 
@@ -32,24 +34,6 @@ def get_speaking_flag():
     return _is_speaking
 
 
-def _resolve_device(device, kind='input'):
-    """Resolve a sounddevice input/output device selector."""
-    if device is None or device == "":
-        return None
-    if isinstance(device, int):
-        return device
-    if isinstance(device, str):
-        devices = sd.query_devices()
-        needle = device.lower().strip()
-        for idx, d in enumerate(devices):
-            name = str(d.get("name", "")).lower()
-            if needle and needle in name:
-                if kind == 'output' and d.get('max_output_channels', 0) > 0:
-                    return idx
-                elif kind == 'input' and d.get('max_input_channels', 0) > 0:
-                    return idx
-    return None
-
 
 class VADRecorder:
     """
@@ -67,6 +51,7 @@ class VADRecorder:
         pre_speech_padding_sec: float = 0.3,
         min_speech_duration_sec: float = 0.5,
         input_device=None,
+        min_audio_energy: int = 0,
     ):
         """
         Args:
@@ -77,6 +62,9 @@ class VADRecorder:
             pre_speech_padding_sec: How much audio to keep before speech started
             min_speech_duration_sec: Minimum speech duration to consider valid
             input_device: Sounddevice input device (name substring, index, or None for default)
+            min_audio_energy: Minimum RMS energy (int16 scale) to consider as speech.
+                             Filters out low-level noise before VAD checks. 0 = disabled.
+                             300-500 = good for filtering ambient noise.
         """
         self.sample_rate = sample_rate
         self.frame_duration_ms = frame_duration_ms
@@ -85,6 +73,7 @@ class VADRecorder:
         self.pre_speech_padding_sec = pre_speech_padding_sec
         self.min_speech_duration_sec = min_speech_duration_sec
         self.input_device = input_device
+        self.min_audio_energy = min_audio_energy
         
         # Frame size in samples
         self.frame_size = int(sample_rate * frame_duration_ms / 1000)
@@ -130,7 +119,7 @@ class VADRecorder:
         silence_frame_count = 0
         speech_frame_count = 0
         
-        print("🎤 Listening... (speak when ready)")
+        print("[MIC] Listening... (speak when ready)")
         
         with sd.InputStream(
             samplerate=self.sample_rate,
@@ -160,6 +149,12 @@ class VADRecorder:
                 except Exception:
                     is_speech = False
                 
+                # Energy gate: filter out low-energy noise before treating as speech
+                if is_speech and self.min_audio_energy > 0:
+                    frame_energy = int(np.abs(frame).mean())
+                    if frame_energy < self.min_audio_energy:
+                        is_speech = False
+                
                 if not is_recording_speech:
                     # Not yet recording - maintain pre-speech buffer
                     pre_speech_buffer.append(frame)
@@ -168,7 +163,7 @@ class VADRecorder:
                     
                     if is_speech:
                         # Speech detected! Start recording
-                        print("🔴 Speech detected - recording...")
+                        print("[REC] Speech detected - recording...")
                         is_recording_speech = True
                         speech_frames = list(pre_speech_buffer)  # Include pre-speech audio
                         speech_frames.append(frame)
@@ -178,7 +173,7 @@ class VADRecorder:
                         # If TTS is playing, signal interruption
                         if _is_speaking.is_set():
                             _interrupt_flag.set()
-                            print("⚡ Interrupting playback...")
+                            print("[!] Interrupting playback...")
                 else:
                     # Currently recording
                     speech_frames.append(frame)
@@ -191,7 +186,7 @@ class VADRecorder:
                         
                         if silence_frame_count >= self.silence_frames_threshold:
                             # Enough silence - stop recording
-                            print("⏹️ Silence detected - processing...")
+                            print("[STOP] Silence detected - processing...")
                             
                             if speech_frame_count >= self.min_speech_frames:
                                 # Valid speech detected
@@ -235,6 +230,7 @@ def record_vad_and_transcribe(
     cancel_event: threading.Event = None,
     identify_speaker: bool = True,
     speaker_threshold: float = 0.75,
+    min_audio_energy: int = 0,
 ) -> Tuple[str, Optional[str]]:
     """
     Record audio using VAD (hands-free), identify speaker, and transcribe it.
@@ -249,6 +245,7 @@ def record_vad_and_transcribe(
         cancel_event: Optional event for cancellation
         identify_speaker: Whether to identify who is speaking
         speaker_threshold: Similarity threshold for speaker identification
+        min_audio_energy: Minimum RMS energy to consider as speech (0=disabled)
         
     Returns:
         Tuple of (transcription, speaker_name or None)
@@ -262,6 +259,7 @@ def record_vad_and_transcribe(
         vad_aggressiveness=vad_aggressiveness,
         silence_threshold_sec=silence_threshold_sec,
         input_device=input_device,
+        min_audio_energy=min_audio_energy,
     )
     
     # Record audio (returns raw audio data)
@@ -280,13 +278,13 @@ def record_vad_and_transcribe(
             from server.process.asr_func.speaker_id import identify_speaker as speaker_id_func
             speaker_name, confidence = speaker_id_func(audio_data, sample_rate, speaker_threshold)
             if speaker_name:
-                print(f"👤 Speaker: {speaker_name} ({confidence:.0%} confidence)")
+                print(f"[ID] Speaker: {speaker_name} ({confidence:.0%} confidence)")
             else:
-                print(f"👤 Speaker: Unknown (best match: {confidence:.0%})")
+                print(f"[ID] Speaker: Unknown (best match: {confidence:.0%})")
         except Exception as e:
             print(f"[Speaker ID] Error: {e}")
     
-    print("🎯 Transcribing...")
+    print("[ASR] Transcribing...")
     
     # Calculate audio duration to decide transcription method
     audio_duration = len(audio_data) / sample_rate
@@ -396,8 +394,14 @@ class BackgroundListener:
                     frame_int = frame.astype(np.int32)
                     rms_energy = np.sqrt(np.mean(frame_int ** 2))
                     
+                    # Require louder speech when TTS is playing to avoid
+                    # speaker-to-mic echo triggering a false interrupt.
+                    eff_energy = self.min_audio_energy
+                    if _is_speaking.is_set():
+                        eff_energy *= 3
+                    
                     # Only check VAD if audio is loud enough
-                    if rms_energy < self.min_audio_energy:
+                    if rms_energy < eff_energy:
                         consecutive_speech_frames = 0
                         continue
                     

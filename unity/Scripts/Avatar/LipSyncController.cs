@@ -89,26 +89,17 @@ namespace Annabeth.Avatar
             }
         }
 
-        /// <summary>
-        /// Start lip sync animation.
-        /// </summary>
         public void StartSpeaking()
         {
             _isSpeaking = true;
             _vowelTimer = 0f;
         }
 
-        /// <summary>
-        /// Stop lip sync animation.
-        /// </summary>
         public void StopSpeaking()
         {
             _isSpeaking = false;
         }
 
-        /// <summary>
-        /// Set a specific vowel shape directly (for more advanced lip sync).
-        /// </summary>
         public void SetVowel(string vowel, float weight)
         {
             if (_expression == null) return;
@@ -123,10 +114,9 @@ namespace Annabeth.Avatar
                 _ => ExpressionKey.Aa
             };
 
-            // Clear other vowels
             foreach (var k in _vowelKeys)
             {
-                _expression.SetWeight(k, k == key ? weight : 0f);
+                _expression.SetWeight(k, k.Equals(key) ? weight : 0f);
             }
         }
     }

@@ -27,9 +27,11 @@ import queue
 import uuid
 import re
 import soundfile as sf
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from server.annabeth_config import load_config, repo_root, resolve_repo_path
+from server.process.memory.feedback import log_feedback
 
 # Add parent directory for shared imports
 _project_root = Path(__file__).parent.parent
@@ -103,6 +105,15 @@ def avatar_speak_end() -> None:
         _state.speaking = False
         asyncio.run_coroutine_threadsafe(
             avatar_api['speak_end'](), 
+            avatar_loop
+        )
+
+
+def avatar_debug_status(status: str, user_text: str = "", response_text: str = "") -> None:
+    """Send debug overlay info to Unity"""
+    if avatar_api and avatar_loop:
+        asyncio.run_coroutine_threadsafe(
+            avatar_api['send_debug_status'](status, user_text, response_text),
             avatar_loop
         )
 
@@ -203,9 +214,60 @@ def _startup_self_check(char_config: dict, input_device, output_device, whisper_
     tts_url = _shared_config.server.tts_url
     try:
         import requests
-        requests.get(tts_url + "/", timeout=1)
+        r = requests.get(tts_url + "/docs", timeout=3)
+        if r.status_code == 200:
+            print(f"TTS: GPT-SoVITS server reachable at {tts_url} [OK]")
+        else:
+            print(f"WARNING: GPT-SoVITS returned status {r.status_code} at {tts_url}/docs")
     except Exception:
-        print(f"NOTE: GPT-SoVITS server not detected at {tts_url} (start it before chatting)")
+        print(f"WARNING: GPT-SoVITS server not detected at {tts_url} (start it before chatting)")
+        print("         Fallback TTS (pyttsx3) will be used if available")
+
+    # Ollama reachability (retry up to 3 times for slow starts)
+    ollama_host = char_config.get('ollama', {}).get('host', 'http://localhost:11434')
+    ollama_model = char_config.get('model', 'mannix/llama3.1-8b-abliterated')
+    ollama_ok = False
+    for _attempt in range(3):
+        try:
+            import requests
+            r = requests.get(f"{ollama_host}/api/tags", timeout=5)
+            if r.status_code == 200:
+                models = [m['name'] for m in r.json().get('models', [])]
+                if any(ollama_model in m for m in models):
+                    print(f"Ollama: {ollama_model} loaded [OK]")
+                else:
+                    print(f"WARNING: Ollama running but model '{ollama_model}' not found")
+                    print(f"         Available: {', '.join(models[:5])}")
+                ollama_ok = True
+                break
+            else:
+                print(f"WARNING: Ollama returned status {r.status_code}")
+        except Exception:
+            if _attempt < 2:
+                print(f"Ollama not ready, retrying ({_attempt + 1}/3)...")
+                time.sleep(2)
+            else:
+                print(f"WARNING: Ollama not detected at {ollama_host} (is it running?)")
+
+    # Audio input/output device validation
+    try:
+        import sounddevice as sd
+        if input_device:
+            from server.process.asr_func.asr_vad import _resolve_device as resolve_input
+            resolved_in = resolve_input(input_device, kind='input')
+            if resolved_in is not None:
+                print(f"Audio input: '{input_device}' -> device {resolved_in} [OK]")
+            else:
+                print(f"WARNING: Input device '{input_device}' not found — will use default")
+        if output_device:
+            from server.process.tts_func.sovits_ping import _resolve_device as resolve_output
+            resolved_out = resolve_output(output_device, kind='output')
+            if resolved_out is not None:
+                print(f"Audio output: '{output_device}' -> device {resolved_out} [OK]")
+            else:
+                print(f"WARNING: Output device '{output_device}' not found — will use default")
+    except Exception as e:
+        print(f"Audio device check error: {e}")
 
     # Repo root recap
     print(f"Repo root: {_shared_config.paths.project_root}")
@@ -271,7 +333,7 @@ def process_read_aloud_queue(output_device, bg_listener) -> bool:
     if not read_aloud.state.is_reading:
         return False
     
-    print("\n[ReadAloud] 📖 Reading selected text...")
+    print("\n[ReadAloud] Reading selected text...")
     audio_dir = _shared_config.paths.audio_dir
     sentence_idx = 0
     
@@ -326,7 +388,7 @@ def process_read_aloud_queue(output_device, bg_listener) -> bool:
         # Check for pause request
         if read_aloud.state.pause_requested:
             read_aloud.state.complete_pause()
-            print("\n[ReadAloud] ⏸️ Paused - ask questions or press R to resume")
+            print("\n[ReadAloud] [PAUSED] Paused - ask questions or press R to resume")
             return True
         
         # Wait for prefetched audio
@@ -358,7 +420,7 @@ def process_read_aloud_queue(output_device, bg_listener) -> bool:
             prefetch_thread[0].start()
             continue
         
-        print(f"  📖 {cleaned}")
+        print(f"  [>] {cleaned}")
         
         # Send highlight data to browser clients
         try:
@@ -417,9 +479,9 @@ def process_read_aloud_queue(output_device, bg_listener) -> bool:
         if was_interrupted:
             # User interrupted - request pause
             read_aloud.request_pause()
-            print("\n[ReadAloud] ⏸️ Interrupted - finishing sentence...")
+            print("\n[ReadAloud] [PAUSED] Interrupted - finishing sentence...")
             read_aloud.state.complete_pause()
-            print("[ReadAloud] ⏸️ Paused - ask questions or press R to resume")
+            print("[ReadAloud] [PAUSED] Paused - ask questions or press R to resume")
             avatar_speak_end()
             # Clean up prefetched audio if any
             with prefetch_lock:
@@ -448,7 +510,7 @@ def process_read_aloud_queue(output_device, bg_listener) -> bool:
         pass
     
     if not read_aloud.state.is_paused:
-        print("[ReadAloud] ✅ Finished reading")
+        print("[ReadAloud] Finished reading [OK]")
     
     return True
 
@@ -512,6 +574,7 @@ vad_cfg = char_config.get('vad', {}) or {}
 use_vad = vad_cfg.get('enabled', True)  # Default to hands-free mode
 vad_aggressiveness = vad_cfg.get('aggressiveness', 3)  # 0-3, higher = more aggressive filtering
 silence_threshold = vad_cfg.get('silence_threshold_sec', 1.0)
+vad_min_energy = vad_cfg.get('min_energy', 300)  # Minimum RMS energy to consider as speech (filters noise)
 # Interrupt detection settings - higher values = less sensitive (fewer false interrupts)
 interrupt_aggressiveness = vad_cfg.get('interrupt_aggressiveness', 3)  # Max filtering for interrupts
 interrupt_speech_frames = vad_cfg.get('interrupt_speech_frames', 15)  # ~450ms of sustained speech needed
@@ -533,11 +596,11 @@ if use_speaker_id:
 _startup_self_check(char_config, input_device, output_device, whisper_cfg)
 
 if use_vad:
-    print("\n🎤 HANDS-FREE MODE enabled - just start speaking!")
+    print("\n[MIC] HANDS-FREE MODE enabled - just start speaking!")
     print("   (Annabeth will listen and respond automatically)")
     print("   (You can interrupt her while she's speaking)\n")
 else:
-    print("\n🔘 PUSH-TO-TALK MODE - press ENTER to record\n")
+    print("\n[PTT] PUSH-TO-TALK MODE - press ENTER to record\n")
 
 # Background listener for interruption detection (uses stricter settings to avoid false triggers)
 bg_listener = BackgroundListener(
@@ -547,6 +610,8 @@ bg_listener = BackgroundListener(
     speech_frames_threshold=interrupt_speech_frames,
     min_audio_energy=interrupt_min_energy,
 )
+
+_prev_llm_thread = None  # Track previous LLM thread for join-on-interrupt
 
 while True:
     # =========================================================================
@@ -596,6 +661,7 @@ while True:
         
         speaker_name = None
         t_record_start = time.time()
+        avatar_debug_status("[MIC] Listening...")
         try:
             if use_vad:
                 # Hands-free VAD-based recording with speaker identification
@@ -608,6 +674,7 @@ while True:
                     silence_threshold_sec=silence_threshold,
                     identify_speaker=use_speaker_id,
                     speaker_threshold=speaker_id_threshold,
+                    min_audio_energy=vad_min_energy,
                 )
                 current_speaker = speaker_name
             else:
@@ -638,11 +705,16 @@ while True:
                 raise
         if not user_spoken_text:
             print("No transcription captured; try again.")
+            avatar_debug_status("[X] No speech captured", user_text="(empty)")
             continue
+        
+        # Send user input to Unity overlay
+        speaker_tag = f"[{speaker_name}]" if speaker_name else ""
+        avatar_debug_status("[...] Processing...", user_text=f"{speaker_tag} {user_spoken_text}")
         
         # Timing: record + transcribe complete
         t_transcribe_done = time.time()
-        print(f"⏱️ [Timing] Record+Transcribe: {t_transcribe_done - t_record_start:.2f}s")
+        print(f"\n[Timing] Record+Transcribe: {t_transcribe_done - t_record_start:.2f}s")
 
         # =====================================================================
         # CHECK FOR READ-ALOUD INTENT
@@ -680,7 +752,7 @@ while True:
             if read_aloud.state.is_paused:
                 qa_context = read_aloud.get_qa_context()
                 if qa_context:
-                    print("[ReadAloud] 💬 Answering question about the text...")
+                    print("[ReadAloud] Answering question about the text...")
         except Exception:
             pass
         
@@ -703,6 +775,7 @@ while True:
         full_response = []
         llm_done = threading.Event()
         tts_done = threading.Event()
+        tts_cancel = threading.Event()  # Signal TTS pipeline to stop
         
         def on_sentence(sentence: str):
             """Called for each sentence from the LLM."""
@@ -720,41 +793,76 @@ while True:
                 sentence_queue.put(None)  # Signal end
         
         def run_tts_pipeline():
-            """Run TTS in background - pre-generate audio while previous plays."""
-            while True:
-                try:
-                    sentence = sentence_queue.get(timeout=0.1)
-                except queue.Empty:
-                    if llm_done.is_set():
+            """Run TTS in background - prefetch audio with parallel TTS submissions."""
+            max_ahead = 3  # Submit up to 3 TTS jobs ahead of playback
+            pending = []   # List of (sentence, future, output_path) in order
+            end_signal = False
+            
+            with ThreadPoolExecutor(max_workers=2, thread_name_prefix="tts") as tts_pool:
+                while not tts_cancel.is_set():
+                    # Fill pending queue up to max_ahead
+                    while len(pending) < max_ahead and not end_signal and not tts_cancel.is_set():
+                        # Use a very short timeout for first sentence (latency critical)
+                        wait = 0.01 if not pending else 0.03
+                        try:
+                            sentence = sentence_queue.get(timeout=wait)
+                        except queue.Empty:
+                            if llm_done.is_set() and sentence_queue.empty():
+                                end_signal = True
+                            break
+                        
+                        if sentence is None:
+                            end_signal = True
+                            break
+                        
+                        cleaned_sentence = clean_text_for_tts(sentence)
+                        if not cleaned_sentence:
+                            continue
+                        
+                        uid = uuid.uuid4().hex
+                        filename = f"output_{uid}.wav"
+                        output_path = audio_dir / filename
+                        output_path.parent.mkdir(parents=True, exist_ok=True)
+                        
+                        future = tts_pool.submit(sovits_gen, cleaned_sentence, output_path)
+                        pending.append((sentence, future, output_path))
+                    
+                    # Drain completed futures in order
+                    while pending:
+                        sentence, future, output_path = pending[0]
+                        if future.done():
+                            pending.pop(0)
+                            result = future.result()
+                            if result:
+                                audio_queue.put((sentence, output_path))
+                            else:
+                                audio_queue.put((sentence, None))
+                        else:
+                            # Wait briefly for the head-of-line future
+                            try:
+                                future.result(timeout=0.03)
+                            except Exception:
+                                pass
+                            break
+                    
+                    # Exit when all done
+                    if end_signal and not pending:
                         break
-                    continue
-                
-                if sentence is None:
-                    break
-                
-                # Clean up the text for natural TTS (remove *actions*, ALL CAPS, etc.)
-                cleaned_sentence = clean_text_for_tts(sentence)
-                if not cleaned_sentence:
-                    continue  # Skip empty sentences after cleanup
-                
-                # Generate TTS for this sentence
-                uid = uuid.uuid4().hex
-                filename = f"output_{uid}.wav"
-                output_path = audio_dir / filename
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-                
-                gen_aud_path = sovits_gen(cleaned_sentence, output_path)
-                if gen_aud_path:
-                    audio_queue.put((sentence, output_path))  # Keep original for display
-                else:
-                    audio_queue.put((sentence, None))  # TTS failed
+                    
+                    time.sleep(0.01)
             
             tts_done.set()
             audio_queue.put(None)  # Signal end
         
+        # Ensure previous turn's LLM thread finished saving history
+        # (prevents race condition where interrupt leaves daemon thread running)
+        if _prev_llm_thread is not None and _prev_llm_thread.is_alive():
+            _prev_llm_thread.join(timeout=8)
+
         # Start LLM generation in background
         llm_thread = threading.Thread(target=run_llm, daemon=True)
         llm_thread.start()
+        _prev_llm_thread = llm_thread
         
         # Start TTS pipeline in background
         tts_thread = threading.Thread(target=run_tts_pipeline, daemon=True)
@@ -766,7 +874,7 @@ while True:
         
         while True:
             try:
-                item = audio_queue.get(timeout=0.1)
+                item = audio_queue.get(timeout=0.05)
             except queue.Empty:
                 if tts_done.is_set():
                     break
@@ -782,7 +890,7 @@ while True:
                 t_first_audio[0] = time.time()
                 # Print timing summary
                 if t_first_sentence[0]:
-                    print(f"\n⏱️ [Timing] LLM first sentence: {t_first_sentence[0] - t_llm_start:.2f}s, TTS: {t_first_audio[0] - t_first_sentence[0]:.2f}s, Total to audio: {t_first_audio[0] - t_start:.2f}s")
+                    print(f"\n[Timing] LLM first sentence: {t_first_sentence[0] - t_llm_start:.2f}s, TTS: {t_first_audio[0] - t_first_sentence[0]:.2f}s, Total to audio: {t_first_audio[0] - t_start:.2f}s")
             
             # Print the sentence
             if first_sentence:
@@ -829,6 +937,21 @@ while True:
         get_speaking_flag().clear()
         avatar_speak_end()
         
+        # Send final response to debug overlay
+        full_resp_text = " ".join(full_response)
+        avatar_debug_status("[MIC] Listening...", user_text=f"{speaker_tag} {user_spoken_text}" if user_spoken_text else "", response_text=full_resp_text)
+        
+        # --- Implicit feedback logging ---
+        t_end = time.time()
+        _fb_speaker = speaker_name or "Unknown"
+        try:
+            if was_interrupted:
+                log_feedback("interruption", speaker=_fb_speaker)
+            else:
+                log_feedback("turn_complete", value=round(t_end - t_start, 2), speaker=_fb_speaker)
+        except Exception:
+            pass
+
         if was_interrupted:
             print("(Annabeth was interrupted - listening for your input...)")
 
@@ -840,7 +963,13 @@ while True:
         import traceback
         traceback.print_exc()
     finally:
-        # clean up audio files
+        # Signal TTS pipeline to stop, wait briefly for it to finish
+        try:
+            tts_cancel.set()
+            tts_thread.join(timeout=2.0)
+        except (NameError, AttributeError):
+            pass
+        # clean up audio files (safe now - TTS thread has exited or timed out)
         try:
             for fp in audio_dir.glob("*.wav"):
                 if fp.is_file():

@@ -16,16 +16,29 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "`n[1/3] Starting GPT-SoVITS TTS Server (Native)..." -ForegroundColor Yellow
 $ttsStartup = @"
 cd '$ProjectRoot\third_party\GPT-SoVITS'
-`$env:CUDA_VISIBLE_DEVICES = '0'
+`$env:CUDA_VISIBLE_DEVICES = '1'
 `$env:is_half = 'true'
 `$env:PATH = '$ProjectRoot\.venv\Lib\site-packages\nvidia\cudnn\bin;' + `$env:PATH
 & '$GPT_SOVITS_PYTHON' -u api_v2.py -a 127.0.0.1 -p 9880
 "@
 Start-Process powershell -ArgumentList "-NoExit", "-Command", $ttsStartup
 
-# Wait for TTS server to be ready (native starts faster than Docker)
-Write-Host "Waiting for TTS server (20 seconds)..." -ForegroundColor Gray
-Start-Sleep -Seconds 20
+# Wait for TTS server to be ready (model loading takes time, especially first run with OneDrive)
+Write-Host "Waiting for TTS server to load models..." -ForegroundColor Gray
+$ttsReady = $false
+for ($i = 0; $i -lt 60; $i++) {
+    Start-Sleep -Seconds 5
+    try {
+        $r = Invoke-WebRequest "http://127.0.0.1:9880/docs" -TimeoutSec 3 -UseBasicParsing -ErrorAction Stop
+        if ($r.StatusCode -eq 200) { $ttsReady = $true; break }
+    } catch {}
+    if ($i % 6 -eq 5) { Write-Host "  Still loading TTS models... ($([int](($i+1)*5))s elapsed)" -ForegroundColor Gray }
+}
+if ($ttsReady) {
+    Write-Host "TTS server is ready!" -ForegroundColor Green
+} else {
+    Write-Host "TTS server not responding after 5 minutes - continuing anyway" -ForegroundColor Yellow
+}
 
 # 2. Start Main Chat Server
 Write-Host "`n[2/3] Starting Main Chat Server..." -ForegroundColor Yellow

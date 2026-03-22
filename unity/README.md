@@ -1,83 +1,96 @@
-# Annabeth Unity Scripts
+# Annabeth Unity Frontend
 
-This folder contains pre-written C# scripts for the Unity migration. These scripts are designed to be dropped into a Unity project after setting up UniVRM and UniWindowController.
+Unity 6 (URP 17.3.0) desktop companion frontend for the Annabeth AI.
+Connects to the Python backend via WebSocket and renders a VRM avatar with
+lip sync, emotions, eye tracking, procedural dance, and VRMA animation playback.
 
-## Setup Instructions
+## Project Location
+- Unity project: `C:\Users\blakd\unit`
+- This folder (`unity/Scripts/`) is a synced backup of the project scripts.
 
-### 1. Install Unity
-1. Download [Unity Hub](https://unity.com/download)
-2. Install **Unity 2022.3 LTS** (with Windows Build Support)
+## Dependencies
+| Package | Version | Purpose |
+|---------|---------|---------|
+| UniVRM (`com.vrmc.vrm` + `com.vrmc.gltf`) | v0.128.3 | VRM/VRMA loading |
+| Input System | 1.19.0 | Mouse input for eye tracking |
+| URP | 17.3.0 | Rendering pipeline |
+| Unity MCP (`com.ivanmurzak.unity.mcp`) | 0.57.1 | Editor automation |
 
-### 2. Create Unity Project
-1. Open Unity Hub → New Project
-2. Select **3D (URP)** or **3D** template
-3. Name: `AnnabethUnity`
-4. Create in: `E:\Unity\AnnabethUnity` (or preferred location)
-
-### 3. Install Required Packages
-Open **Window → Package Manager**, click **+** → **Add package from git URL**:
-
+## Scripts (14 files)
 ```
-# UniVRM (VRM loading)
-https://github.com/vrm-c/UniVRM.git?path=/Packages/com.vrmc.vrm#v0.131.0
-
-# UniWindowController (transparent window)
-https://github.com/kirurobo/UniWindowController.git#upm
-```
-
-### 4. Install Newtonsoft.Json
-In Package Manager, search for **Newtonsoft Json** and install it.
-
-### 5. Copy Scripts
-Copy the entire `Scripts/` folder to your Unity project's `Assets/Scripts/`.
-
-### 6. Project Structure
-```
-Assets/
-├── Scripts/
-│   ├── Core/
-│   │   ├── SocketClient.cs      # Python communication
-│   │   └── MessageHandler.cs    # Message routing
-│   ├── Avatar/
-│   │   ├── AvatarController.cs  # VRM loading & coordination
-│   │   ├── LipSyncController.cs # Vowel-based lip sync
-│   │   ├── EmotionController.cs # Expression control
-│   │   ├── BlinkController.cs   # Auto-blink
-│   │   └── EyeTrackingController.cs # Mouse follow
-│   ├── Dance/
-│   │   └── BeatDanceController.cs # Procedural dance
-│   ├── Input/
-│   │   └── HotkeyManager.cs     # Keyboard shortcuts
-│   └── CompanionManager.cs      # Main coordinator
-├── StreamingAssets/
-│   └── Models/
-│       └── claire_avatar.vrm    # Copy from Anabeth/models/vrm/
-├── Prefabs/
-│   └── UniWindowController.prefab # From package
-└── Scenes/
-    └── Main.unity
+Assets/Scripts/
+├── Core/
+│   ├── WebSocketClient.cs           # ws://127.0.0.1:8765/ws client
+│   ├── MessageHandler.cs            # Message routing + send methods
+│   └── TransparentWindowController.cs # Win32 P/Invoke transparent overlay
+├── Avatar/
+│   ├── AvatarController.cs          # VRM loading + controller init
+│   ├── LipSyncController.cs         # Vowel cycling lip sync
+│   ├── EmotionController.cs         # Expression blend shapes
+│   ├── BlinkController.cs           # Randomized auto-blink
+│   ├── EyeTrackingController.cs     # Mouse → VRM LookAt
+│   └── IdleAnimationController.cs   # Breathing + head drift
+├── Dance/
+│   ├── BeatDanceController.cs       # 13-bone procedural dance
+│   └── VrmaAnimationController.cs   # Runtime VRMA loading + playback
+├── Input/
+│   └── HotkeyManager.cs            # Keyboard shortcuts
+└── CompanionManager.cs              # Main coordinator
 ```
 
-### 7. Scene Setup
-1. Add an empty GameObject named `Companion`
-2. Add these components to it:
-   - `SocketClient`
-   - `MessageHandler`
-   - `CompanionManager`
-   - `HotkeyManager`
-3. Add a child GameObject named `Avatar`
-4. Add these components to Avatar:
-   - `AvatarController`
-   - `LipSyncController`
-   - `EmotionController`
-   - `BlinkController`
-   - `EyeTrackingController`
-   - `BeatDanceController`
-5. Add `UniWindowController` prefab to scene
-6. Configure UniWindowController:
-   - Is Transparent: ✓
-   - Is Topmost: ✓
-   - Is Hit Test Enabled: ✓
+## Scene: SampleScene
+```
+Hierarchy:
+├── Main Camera (FOV 30, pos 0,1,3.5, looking at avatar)
+├── Directional Light
+├── Global Volume (URP post-processing)
+├── CompanionManager
+│   └── Components: WebSocketClient, MessageHandler, CompanionManager, HotkeyManager
+└── AvatarRoot
+    └── Components: AvatarController, LipSyncController, EmotionController,
+                    BlinkController, EyeTrackingController, IdleAnimationController,
+                    BeatDanceController, VrmaAnimationController
+```
+
+## StreamingAssets
+```
+Assets/StreamingAssets/
+├── Models/
+│   └── claire_avatar.vrm
+└── Animations/
+    ├── shikanoko_dance.vrma
+    ├── shikanoko_dance_original.vrma
+    ├── shikanoko_dance.fbx
+    └── rumba_dancing.fbx
+```
+
+## Hotkeys
+| Key | Action |
+|-----|--------|
+| D | Cycle dance style (None → Procedural → Shikanoko) |
+| S | Toggle silence |
+| Q | Pause read-aloud |
+| R | Resume read-aloud |
+| 1/2/3 | Set dance style directly |
+| Space | Interrupt |
+| Escape | Return to idle |
+| Ctrl+Shift+R | Read aloud (global) |
+| Ctrl+Shift+A | Active mode (global) |
+| Ctrl+Shift+D | Dance mode (global) |
+| Ctrl+Shift+M | Toggle mute (global) |
+
+## Build
+1. Open Unity project at `C:\Users\blakd\unit`
+2. Menu: **Annabeth → Configure Build Settings** (sets window size, D3D11, etc.)
+3. Menu: **Annabeth → Build Standalone** or **File → Build And Run**
+
+## Transparent Window (Standalone Only)
+The `TransparentWindowController` uses Win32 P/Invoke to:
+- Remove window borders (frameless)
+- Enable DWM transparency (transparent background)
+- Set always-on-top
+- Right-click drag to move window
+- Only active in standalone builds, not in Editor.
 
 ### 8. Player Settings
 **Edit → Project Settings → Player:**

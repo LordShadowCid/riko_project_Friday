@@ -42,7 +42,7 @@ def record_and_transcribe(model, output_file="recording.wav", samplerate=44100, 
     print("Press ENTER to start recording...")
     input()
     
-    print("🔴 Recording... Press ENTER to stop")
+    print("[REC] Recording... Press ENTER to stop")
     
     device = _resolve_device(input_device, kind='input')
 
@@ -58,7 +58,7 @@ def record_and_transcribe(model, output_file="recording.wav", samplerate=44100, 
     sd.stop()
     sd.wait()
     
-    print("⏹️  Saving audio...")
+    print("[STOP] Saving audio...")
     
     # Write the file
     sf.write(output_file, recording, samplerate)
@@ -66,7 +66,7 @@ def record_and_transcribe(model, output_file="recording.wav", samplerate=44100, 
     if (not os.path.exists(output_file)) or os.path.getsize(output_file) == 0:
         raise RuntimeError(f"Recorded file missing or empty: {output_file}")
     
-    print("🎯 Transcribing...")
+    print("[ASR] Transcribing...")
 
     transcription = transcribe_file(model, output_file)
     

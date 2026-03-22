@@ -4,39 +4,26 @@ using UnityEngine;
 namespace Annabeth.Core
 {
     /// <summary>
-    /// Message types matching Python shared/config.py.
+    /// Message types matching Python shared/config.py MessageType enum.
     /// Keep in sync with the Python backend.
     /// </summary>
     public static class MessageTypes
     {
-        // Mode messages
+        // Client → Server
         public const string MODE_CHANGE = "mode_change";
-        public const string SET_MODE = "set_mode";
-        
-        // Speech messages
+        public const string TOGGLE_SILENCE = "toggle_silence";
+        public const string SET_SILENCE = "set_silence";
+        public const string READ_PAUSE = "read_pause";
+        public const string READ_RESUME = "read_resume";
+
+        // Server → Client
         public const string SPEAK_START = "speak_start";
         public const string SPEAK_END = "speak_end";
         public const string EMOTION = "emotion";
-        
-        // Silence control
-        public const string SILENCE_TOGGLE = "silence_toggle";
-        public const string SILENCED = "silenced";
-        
-        // Read-aloud control
-        public const string READ_START = "read_start";
-        public const string READ_PAUSE = "read_pause";
-        public const string READ_RESUME = "read_resume";
-        public const string READ_END = "read_end";
-        
-        // Audio analysis
         public const string AUDIO_ANALYSIS = "audio_analysis";
-        
-        // Dance control
-        public const string DANCE_STYLE = "dance_style";
-        public const string PLAY_ANIMATION = "play_animation";
-        
-        // Hotkey requests
-        public const string HOTKEY = "hotkey";
+        public const string READ_HIGHLIGHT = "read_highlight";
+        public const string READ_CLEAR = "read_clear";
+        public const string DEBUG_STATUS = "debug_status";
     }
 
     /// <summary>
@@ -60,12 +47,12 @@ namespace Annabeth.Core
     }
 
     /// <summary>
-    /// Handles routing of messages from SocketClient to appropriate handlers.
+    /// Routes messages from WebSocketClient to typed events.
     /// </summary>
     public class MessageHandler : MonoBehaviour
     {
         [Header("References")]
-        [SerializeField] private SocketClient socketClient;
+        [SerializeField] private WebSocketClient webSocketClient;
 
         // Events for specific message types
         public event System.Action<string> OnSpeakStart;
@@ -73,37 +60,33 @@ namespace Annabeth.Core
         public event System.Action<string> OnEmotionChange;
         public event System.Action<CompanionMode> OnModeChange;
         public event System.Action<bool> OnSilenceToggle;
-        public event System.Action<float, float, float> OnAudioAnalysis; // beatEnergy, bassEnergy, trebleEnergy
+        public event System.Action<float, float, float, bool> OnAudioAnalysis;
         public event System.Action<DanceStyle> OnDanceStyleChange;
         public event System.Action<string> OnPlayAnimation;
         public event System.Action OnReadStart;
         public event System.Action OnReadPause;
         public event System.Action OnReadResume;
         public event System.Action OnReadEnd;
+        /// <summary>
+        /// Fired when debug_status message arrives: (status, userText, responseText)
+        /// </summary>
+        public event System.Action<string, string, string> OnDebugStatus;
 
         private void Start()
         {
-            if (socketClient == null)
-            {
-                socketClient = FindObjectOfType<SocketClient>();
-            }
+            if (webSocketClient == null)
+                webSocketClient = FindFirstObjectByType<WebSocketClient>();
 
-            if (socketClient != null)
-            {
-                socketClient.OnMessageReceived += HandleMessage;
-            }
+            if (webSocketClient != null)
+                webSocketClient.OnMessageReceived += HandleMessage;
             else
-            {
-                Debug.LogError("[MessageHandler] SocketClient not found!");
-            }
+                Debug.LogError("[MessageHandler] WebSocketClient not found!");
         }
 
         private void OnDestroy()
         {
-            if (socketClient != null)
-            {
-                socketClient.OnMessageReceived -= HandleMessage;
-            }
+            if (webSocketClient != null)
+                webSocketClient.OnMessageReceived -= HandleMessage;
         }
 
         private void HandleMessage(string type, Dictionary<string, object> data)
@@ -128,54 +111,51 @@ namespace Annabeth.Core
                     if (data.TryGetValue("mode", out object modeObj))
                     {
                         string modeName = modeObj.ToString().ToLower();
-                        CompanionMode mode = modeName switch
+                        switch (modeName)
                         {
-                            "active" => CompanionMode.Active,
-                            "idle" => CompanionMode.Idle,
-                            "dance" => CompanionMode.Dance,
-                            _ => CompanionMode.Idle
-                        };
-                        OnModeChange?.Invoke(mode);
+                            case "active":
+                                OnModeChange?.Invoke(CompanionMode.Active);
+                                break;
+                            case "idle":
+                                OnModeChange?.Invoke(CompanionMode.Idle);
+                                break;
+                            case "dance":
+                                OnModeChange?.Invoke(CompanionMode.Dance);
+                                break;
+                            case "dance_beat":
+                                OnModeChange?.Invoke(CompanionMode.Dance);
+                                OnDanceStyleChange?.Invoke(DanceStyle.Procedural);
+                                break;
+                            case "dance_full":
+                                OnModeChange?.Invoke(CompanionMode.Dance);
+                                OnDanceStyleChange?.Invoke(DanceStyle.ShikanokoDance);
+                                break;
+                            default:
+                                OnModeChange?.Invoke(CompanionMode.Idle);
+                                break;
+                        }
                     }
                     break;
 
-                case MessageTypes.SILENCED:
-                    bool silenced = data.TryGetValue("silenced", out object silencedObj) && 
+                case MessageTypes.SET_SILENCE:
+                    bool silenced = data.TryGetValue("silenced", out object silencedObj) &&
                                    (silencedObj is bool b ? b : bool.Parse(silencedObj.ToString()));
                     OnSilenceToggle?.Invoke(silenced);
                     break;
 
                 case MessageTypes.AUDIO_ANALYSIS:
-                    float beatEnergy = GetFloat(data, "beat_energy", 0f);
-                    float bassEnergy = GetFloat(data, "bass_energy", 0f);
-                    float trebleEnergy = GetFloat(data, "treble_energy", 0f);
-                    OnAudioAnalysis?.Invoke(beatEnergy, bassEnergy, trebleEnergy);
+                    float bass = GetFloat(data, "bass", 0f);
+                    float mid = GetFloat(data, "mid", 0f);
+                    float high = GetFloat(data, "high", 0f);
+                    bool isBeat = GetBool(data, "beat", false);
+                    OnAudioAnalysis?.Invoke(bass, mid, high, isBeat);
                     break;
 
-                case MessageTypes.DANCE_STYLE:
-                    int style = GetInt(data, "style", 0);
-                    OnDanceStyleChange?.Invoke((DanceStyle)style);
-                    break;
-
-                case MessageTypes.PLAY_ANIMATION:
-                    string animName = data.TryGetValue("name", out object nameObj) ? nameObj.ToString() : "";
-                    OnPlayAnimation?.Invoke(animName);
-                    break;
-
-                case MessageTypes.READ_START:
-                    OnReadStart?.Invoke();
-                    break;
-
-                case MessageTypes.READ_PAUSE:
-                    OnReadPause?.Invoke();
-                    break;
-
-                case MessageTypes.READ_RESUME:
-                    OnReadResume?.Invoke();
-                    break;
-
-                case MessageTypes.READ_END:
-                    OnReadEnd?.Invoke();
+                case MessageTypes.DEBUG_STATUS:
+                    string dbgStatus = data.TryGetValue("status", out object sObj) ? sObj?.ToString() ?? "" : "";
+                    string dbgUser = data.TryGetValue("user_text", out object uObj) ? uObj?.ToString() ?? "" : "";
+                    string dbgResp = data.TryGetValue("response_text", out object rObj) ? rObj?.ToString() ?? "" : "";
+                    OnDebugStatus?.Invoke(dbgStatus, dbgUser, dbgResp);
                     break;
 
                 default:
@@ -197,55 +177,71 @@ namespace Annabeth.Core
             return defaultValue;
         }
 
-        private int GetInt(Dictionary<string, object> data, string key, int defaultValue)
+        private bool GetBool(Dictionary<string, object> data, string key, bool defaultValue)
         {
             if (data.TryGetValue(key, out object val))
             {
-                if (val is long l) return (int)l;
-                if (val is int i) return i;
-                if (int.TryParse(val.ToString(), out int parsed)) return parsed;
+                if (val is bool b) return b;
+                if (bool.TryParse(val.ToString(), out bool parsed)) return parsed;
             }
             return defaultValue;
         }
 
-        // Methods to send messages to Python
+        // ── Methods to send messages to Python ──────────────────────
+
         public void SendModeChange(CompanionMode mode)
         {
-            socketClient?.Send(MessageTypes.SET_MODE, new Dictionary<string, object>
+            // Map Unity modes to Python CompanionMode enum values
+            string modeStr = mode switch
             {
-                ["mode"] = mode.ToString().ToLower()
+                CompanionMode.Active => "active",
+                CompanionMode.Idle => "idle",
+                CompanionMode.Dance => "dance_beat",  // default dance mode for Python
+                _ => "idle"
+            };
+            webSocketClient?.Send(MessageTypes.MODE_CHANGE, new Dictionary<string, object>
+            {
+                ["mode"] = modeStr
             });
         }
 
         public void SendSilenceToggle()
         {
-            socketClient?.Send(MessageTypes.SILENCE_TOGGLE);
+            webSocketClient?.Send(MessageTypes.TOGGLE_SILENCE);
         }
 
         public void SendDanceStyle(DanceStyle style)
         {
-            socketClient?.Send(MessageTypes.DANCE_STYLE, new Dictionary<string, object>
+            // Send the appropriate Python CompanionMode for the dance style
+            string modeStr = style switch
             {
-                ["style"] = (int)style
+                DanceStyle.Procedural => "dance_beat",
+                DanceStyle.ShikanokoDance => "dance_full",
+                _ => "active"  // DanceStyle.None = exit dance
+            };
+            webSocketClient?.Send(MessageTypes.MODE_CHANGE, new Dictionary<string, object>
+            {
+                ["mode"] = modeStr
             });
         }
 
         public void SendHotkey(string key)
         {
-            socketClient?.Send(MessageTypes.HOTKEY, new Dictionary<string, object>
-            {
-                ["key"] = key
-            });
+            // Map hotkey actions to actual WebSocket messages
+            if (key == "read_pause")
+                webSocketClient?.Send(MessageTypes.READ_PAUSE);
+            else if (key == "read_resume")
+                webSocketClient?.Send(MessageTypes.READ_RESUME);
         }
 
         public void SendReadPause()
         {
-            socketClient?.Send(MessageTypes.READ_PAUSE);
+            webSocketClient?.Send(MessageTypes.READ_PAUSE);
         }
 
         public void SendReadResume()
         {
-            socketClient?.Send(MessageTypes.READ_RESUME);
+            webSocketClient?.Send(MessageTypes.READ_RESUME);
         }
     }
 }

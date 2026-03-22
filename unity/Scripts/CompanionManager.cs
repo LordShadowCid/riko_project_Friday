@@ -12,18 +12,20 @@ namespace Annabeth
     public class CompanionManager : MonoBehaviour
     {
         [Header("Core Components")]
-        [SerializeField] private SocketClient socketClient;
+        [SerializeField] private WebSocketClient webSocketClient;
         [SerializeField] private MessageHandler messageHandler;
-        
+
         [Header("Avatar Components")]
         [SerializeField] private AvatarController avatarController;
         [SerializeField] private LipSyncController lipSyncController;
         [SerializeField] private EmotionController emotionController;
         [SerializeField] private BlinkController blinkController;
         [SerializeField] private EyeTrackingController eyeTrackingController;
-        
+        [SerializeField] private IdleAnimationController idleAnimationController;
+
         [Header("Dance Components")]
         [SerializeField] private BeatDanceController beatDanceController;
+        [SerializeField] private VrmaAnimationController vrmaAnimationController;
 
         [Header("State")]
         [SerializeField] private CompanionMode currentMode = CompanionMode.Idle;
@@ -31,21 +33,24 @@ namespace Annabeth
         [SerializeField] private bool isSilenced;
         [SerializeField] private bool isSpeaking;
 
+        // Track whether VRMA animation is audio-paused (no music playing)
+        private bool _vrmaAudioPaused;
+
         public CompanionMode CurrentMode => currentMode;
         public bool IsSpeaking => isSpeaking;
         public bool IsSilenced => isSilenced;
 
         private void Awake()
         {
-            // Auto-find components if not assigned
-            if (socketClient == null) socketClient = FindObjectOfType<SocketClient>();
-            if (messageHandler == null) messageHandler = FindObjectOfType<MessageHandler>();
-            if (avatarController == null) avatarController = FindObjectOfType<AvatarController>();
+            Application.runInBackground = true;
+
+            if (webSocketClient == null) webSocketClient = FindFirstObjectByType<WebSocketClient>();
+            if (messageHandler == null) messageHandler = FindFirstObjectByType<MessageHandler>();
+            if (avatarController == null) avatarController = FindFirstObjectByType<AvatarController>();
         }
 
         private void Start()
         {
-            // Subscribe to events
             if (messageHandler != null)
             {
                 messageHandler.OnSpeakStart += HandleSpeakStart;
@@ -57,7 +62,6 @@ namespace Annabeth
                 messageHandler.OnDanceStyleChange += HandleDanceStyleChange;
             }
 
-            // Subscribe to VRM loaded event
             if (avatarController != null)
             {
                 avatarController.OnVrmLoaded += OnVrmLoaded;
@@ -66,7 +70,6 @@ namespace Annabeth
 
         private void OnDestroy()
         {
-            // Unsubscribe from events
             if (messageHandler != null)
             {
                 messageHandler.OnSpeakStart -= HandleSpeakStart;
@@ -87,21 +90,34 @@ namespace Annabeth
         private void OnVrmLoaded(UniVRM10.Vrm10Instance vrm)
         {
             Debug.Log("[CompanionManager] VRM loaded, initializing components...");
-            
+
             // Find and initialize avatar sub-controllers
             lipSyncController = avatarController.GetComponentInChildren<LipSyncController>();
             emotionController = avatarController.GetComponentInChildren<EmotionController>();
             blinkController = avatarController.GetComponentInChildren<BlinkController>();
             eyeTrackingController = avatarController.GetComponentInChildren<EyeTrackingController>();
-            
-            // Initialize beat dance if present
+            idleAnimationController = avatarController.GetComponentInChildren<IdleAnimationController>();
+
+            // Initialize dance controller
             if (beatDanceController != null)
             {
                 beatDanceController.Initialize(vrm);
             }
+
+            // Initialize VRMA animation controller
+            if (vrmaAnimationController != null)
+            {
+                vrmaAnimationController.Initialize(vrm);
+            }
+
+            // Initialize idle animation
+            if (idleAnimationController != null)
+            {
+                idleAnimationController.Initialize(vrm);
+            }
         }
 
-        // === Event Handlers ===
+        // ── Event Handlers ──────────────────────────────────────────
 
         private void HandleSpeakStart(string text)
         {
@@ -135,6 +151,7 @@ namespace Annabeth
             {
                 case CompanionMode.Dance:
                     beatDanceController?.StopDancing();
+                    vrmaAnimationController?.Stop();
                     break;
             }
 
@@ -143,14 +160,17 @@ namespace Annabeth
             {
                 case CompanionMode.Active:
                     eyeTrackingController?.SetEnabled(true);
+                    idleAnimationController?.SetEnabled(true);
                     break;
-                    
+
                 case CompanionMode.Idle:
                     eyeTrackingController?.SetEnabled(true);
+                    idleAnimationController?.SetEnabled(true);
                     emotionController?.ClearEmotion();
                     break;
-                    
+
                 case CompanionMode.Dance:
+                    idleAnimationController?.SetEnabled(false);
                     if (currentDanceStyle == DanceStyle.Procedural)
                     {
                         beatDanceController?.StartDancing();
@@ -167,11 +187,29 @@ namespace Annabeth
             Debug.Log($"[CompanionManager] Silenced: {silenced}");
         }
 
-        private void HandleAudioAnalysis(float beatEnergy, float bassEnergy, float trebleEnergy)
+        private void HandleAudioAnalysis(float bass, float mid, float high, bool isBeat)
         {
-            if (currentMode == CompanionMode.Dance && currentDanceStyle == DanceStyle.Procedural)
+            if (currentMode != CompanionMode.Dance) return;
+
+            if (currentDanceStyle == DanceStyle.Procedural)
             {
-                beatDanceController?.UpdateAudioData(beatEnergy, bassEnergy, trebleEnergy);
+                beatDanceController?.UpdateAudioData(bass, mid, high, isBeat);
+            }
+            else if (currentDanceStyle == DanceStyle.ShikanokoDance && vrmaAnimationController != null)
+            {
+                // Gate VRMA animation on audio — pause when silent, resume when music plays
+                float energy = bass * 0.5f + mid * 0.3f + high * 0.2f;
+                const float vrmaThreshold = 0.08f;
+                if (energy < vrmaThreshold && !_vrmaAudioPaused)
+                {
+                    vrmaAnimationController.Pause();
+                    _vrmaAudioPaused = true;
+                }
+                else if (energy >= vrmaThreshold && _vrmaAudioPaused)
+                {
+                    vrmaAnimationController.Resume();
+                    _vrmaAudioPaused = false;
+                }
             }
         }
 
@@ -185,16 +223,18 @@ namespace Annabeth
                 {
                     case DanceStyle.None:
                         beatDanceController?.StopDancing();
+                        vrmaAnimationController?.Stop();
                         break;
-                        
+
                     case DanceStyle.Procedural:
+                        vrmaAnimationController?.Stop();
                         beatDanceController?.StartDancing();
                         break;
-                        
+
                     case DanceStyle.ShikanokoDance:
                         beatDanceController?.StopDancing();
-                        // TODO: Trigger VRMA animation
-                        Debug.Log("[CompanionManager] Shikanoko dance - VRMA playback not yet implemented");
+                        _vrmaAudioPaused = true; // Start paused until music detected
+                        _ = PlayVrmaAnimation("shikanoko_dance.vrma");
                         break;
                 }
             }
@@ -202,23 +242,55 @@ namespace Annabeth
             Debug.Log($"[CompanionManager] Dance style: {style}");
         }
 
-        // === Public Methods ===
+        // ── Public Methods ──────────────────────────────────────────
 
-        /// <summary>
-        /// Set the current mode programmatically.
-        /// </summary>
         public void SetMode(CompanionMode mode)
         {
             HandleModeChange(mode);
             messageHandler?.SendModeChange(mode);
         }
 
-        /// <summary>
-        /// Toggle silence state.
-        /// </summary>
+        public void StartDance(DanceStyle style)
+        {
+            HandleModeChange(CompanionMode.Dance);
+            HandleDanceStyleChange(style);
+            messageHandler?.SendDanceStyle(style);
+        }
+
+        public void SetDanceStyle(DanceStyle style)
+        {
+            if (style == DanceStyle.None)
+            {
+                SetMode(CompanionMode.Active);
+            }
+            else
+            {
+                HandleDanceStyleChange(style);
+                messageHandler?.SendDanceStyle(style);
+            }
+        }
+
         public void ToggleSilence()
         {
             messageHandler?.SendSilenceToggle();
+        }
+
+        /// <summary>
+        /// Play a VRMA animation by filename (from StreamingAssets/Animations/).
+        /// </summary>
+        private async System.Threading.Tasks.Task PlayVrmaAnimation(string fileName)
+        {
+            if (vrmaAnimationController == null)
+            {
+                Debug.LogWarning("[CompanionManager] VrmaAnimationController not assigned.");
+                return;
+            }
+            await vrmaAnimationController.LoadAndPlay(fileName, destroyCancellationToken);
+            // Start paused so animation only plays when music is detected
+            if (_vrmaAudioPaused)
+            {
+                vrmaAnimationController.Pause();
+            }
         }
     }
 }

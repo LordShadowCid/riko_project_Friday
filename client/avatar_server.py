@@ -100,9 +100,9 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
                             # Set interrupt flag to stop audio playback immediately
                             get_interrupt_flag().set()
                             read_aloud.request_pause()
-                            print("[Avatar] 📖 Read-aloud pause requested + audio interrupted (Q key)")
+                            print("[Avatar] Read-aloud pause requested + audio interrupted (Q key)")
                         else:
-                            print("[Avatar] 📖 Not currently reading")
+                            print("[Avatar] Not currently reading")
                     except Exception as e:
                         print(f"[Avatar] Read pause error: {e}")
                 
@@ -113,9 +113,9 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
                         read_aloud = get_read_aloud_manager()
                         if read_aloud.state.is_paused:
                             read_aloud.resume()
-                            print("[Avatar] 📖 Read-aloud resumed (R key)")
+                            print("[Avatar] Read-aloud resumed (R key)")
                         else:
-                            print("[Avatar] 📖 Not currently paused")
+                            print("[Avatar] Not currently paused")
                     except Exception as e:
                         print(f"[Avatar] Read resume error: {e}")
                     
@@ -189,6 +189,16 @@ async def send_read_clear() -> None:
     """Clear read-aloud highlights."""
     await broadcast({
         "type": MessageType.READ_CLEAR.value,
+    })
+
+
+async def send_debug_status(status: str, user_text: str = "", response_text: str = "") -> None:
+    """Send debug status info to all clients for the on-screen overlay."""
+    await broadcast({
+        "type": MessageType.DEBUG_STATUS.value,
+        "status": status,
+        "user_text": user_text,
+        "response_text": response_text,
     })
 
 
@@ -339,6 +349,7 @@ def get_avatar_api() -> Dict[str, Any]:
         'send_audio_data': send_audio_data,
         'send_read_highlight': send_read_highlight,
         'send_read_clear': send_read_clear,
+        'send_debug_status': send_debug_status,
         'start_audio_analyzer': start_audio_analyzer,
         'stop_audio_analyzer': stop_audio_analyzer,
         'get_current_mode': get_current_mode,

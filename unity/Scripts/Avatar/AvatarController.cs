@@ -4,10 +4,6 @@ using UniVRM10;
 
 namespace Annabeth.Avatar
 {
-    /// <summary>
-    /// Main avatar controller that coordinates all VRM components.
-    /// Handles VRM loading and provides access to VRM instance.
-    /// </summary>
     public class AvatarController : MonoBehaviour
     {
         [Header("VRM Settings")]
@@ -28,7 +24,6 @@ namespace Annabeth.Avatar
         public Vrm10RuntimeExpression Expression => _expression;
         public bool IsLoaded => _isLoaded;
 
-        // Events
         public event System.Action<Vrm10Instance> OnVrmLoaded;
 
         private async void Start()
@@ -39,12 +34,8 @@ namespace Annabeth.Avatar
             }
         }
 
-        /// <summary>
-        /// Load a VRM model from the StreamingAssets folder.
-        /// </summary>
         public async Task LoadVRM(string path)
         {
-            // Clean up existing VRM
             if (_vrmInstance != null)
             {
                 Destroy(_vrmInstance.gameObject);
@@ -57,45 +48,59 @@ namespace Annabeth.Avatar
             {
                 string fullPath = System.IO.Path.Combine(Application.streamingAssetsPath, path);
                 Debug.Log($"[AvatarController] Loading VRM from: {fullPath}");
+                Debug.Log($"[AvatarController] File exists: {System.IO.File.Exists(fullPath)}");
 
-                // Load VRM asynchronously
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                
                 _vrmInstance = await Vrm10.LoadPathAsync(fullPath,
                     canLoadVrm0X: true,
                     showMeshes: true,
-                    materialGenerator: null,
-                    vrmMetaInformationCallback: null,
                     ct: destroyCancellationToken);
+
+                sw.Stop();
+                Debug.Log($"[AvatarController] LoadPathAsync returned in {sw.ElapsedMilliseconds}ms, result={((_vrmInstance != null) ? _vrmInstance.gameObject.name : "NULL")}");
 
                 if (_vrmInstance == null)
                 {
-                    Debug.LogError("[AvatarController] Failed to load VRM!");
+                    Debug.LogError("[AvatarController] Failed to load VRM - returned null!");
                     return;
                 }
 
-                // Position and parent the VRM
                 _vrmInstance.transform.SetParent(transform, false);
                 _vrmInstance.transform.localPosition = Vector3.zero;
                 _vrmInstance.transform.localRotation = Quaternion.identity;
 
-                // Get expression runtime
+                // VRM 1.0 models face +Z natively. Place camera on +Z side
+                // looking back toward origin with Y-rotation only.
+                // NO Z-roll — there is no URP Y-flip to compensate for.
+                var cam = Camera.main;
+                if (cam != null)
+                {
+                    cam.transform.position = new Vector3(0f, 1.3f, 3.0f);
+                    cam.transform.rotation = Quaternion.Euler(0f, 180f, 0f);
+                }
+
                 _expression = _vrmInstance.Runtime.Expression;
 
-                // Initialize sub-controllers
                 InitializeControllers();
+                ApplyRelaxedPose();
 
                 _isLoaded = true;
                 Debug.Log("[AvatarController] VRM loaded successfully!");
                 OnVrmLoaded?.Invoke(_vrmInstance);
             }
+            catch (System.OperationCanceledException)
+            {
+                Debug.LogWarning("[AvatarController] VRM loading was cancelled");
+            }
             catch (System.Exception e)
             {
-                Debug.LogError($"[AvatarController] Error loading VRM: {e.Message}");
+                Debug.LogError($"[AvatarController] Error loading VRM: {e.GetType().Name}: {e.Message}\n{e.StackTrace}");
             }
         }
 
         private void InitializeControllers()
         {
-            // Auto-find controllers if not assigned
             if (lipSyncController == null)
                 lipSyncController = GetComponentInChildren<LipSyncController>();
             if (emotionController == null)
@@ -105,22 +110,38 @@ namespace Annabeth.Avatar
             if (eyeTrackingController == null)
                 eyeTrackingController = GetComponentInChildren<EyeTrackingController>();
 
-            // Initialize with VRM instance
             lipSyncController?.Initialize(_vrmInstance);
             emotionController?.Initialize(_vrmInstance);
             blinkController?.Initialize(_vrmInstance);
             eyeTrackingController?.Initialize(_vrmInstance);
         }
 
-        /// <summary>
-        /// Get a humanoid bone transform.
-        /// </summary>
         public Transform GetBone(HumanBodyBones bone)
         {
             if (!_isLoaded || _vrmInstance == null) return null;
             
             var animator = _vrmInstance.GetComponent<Animator>();
             return animator?.GetBoneTransform(bone);
+        }
+
+        /// <summary>
+        /// Sets a natural resting pose via the VRM10 ControlRig so the avatar
+        /// doesn't remain in T-pose when no animation clip is playing.
+        /// </summary>
+        private void ApplyRelaxedPose()
+        {
+            var rig = _vrmInstance.Runtime?.ControlRig;
+            if (rig == null) return;
+
+            var lUA = rig.GetBoneTransform(HumanBodyBones.LeftUpperArm);
+            var rUA = rig.GetBoneTransform(HumanBodyBones.RightUpperArm);
+            var lLA = rig.GetBoneTransform(HumanBodyBones.LeftLowerArm);
+            var rLA = rig.GetBoneTransform(HumanBodyBones.RightLowerArm);
+
+            if (lUA != null) lUA.localRotation = Quaternion.Euler(0f, 0f, 55f);
+            if (rUA != null) rUA.localRotation = Quaternion.Euler(0f, 0f, -55f);
+            if (lLA != null) lLA.localRotation = Quaternion.Euler(0f, -20f, 0f);
+            if (rLA != null) rLA.localRotation = Quaternion.Euler(0f, 20f, 0f);
         }
 
         private void OnDestroy()

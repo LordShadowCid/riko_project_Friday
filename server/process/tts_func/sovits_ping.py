@@ -3,8 +3,10 @@ import requests
 import time
 import soundfile as sf 
 import sounddevice as sd
+from pathlib import Path
 
 from server.annabeth_config import load_config, resolve_repo_path
+from server.utils import resolve_device as _resolve_device
 
 char_config = load_config()
 
@@ -19,33 +21,6 @@ def _get_tts_session() -> requests.Session:
         # Set default timeout
         _tts_session.headers.update({'Content-Type': 'application/json'})
     return _tts_session
-
-
-def _resolve_device(device, kind='input'):
-    """Resolve a sounddevice input/output device selector.
-
-    - None: use default
-    - int: treated as device index
-    - str: case-insensitive substring match against device names
-    - kind: 'input' or 'output' - filters to only match devices with channels for that direction
-    """
-    if device is None or device == "":
-        return None
-    if isinstance(device, int):
-        return device
-    if isinstance(device, str):
-        devices = sd.query_devices()
-        needle = device.lower().strip()
-        for idx, d in enumerate(devices):
-            name = str(d.get("name", "")).lower()
-            if needle and needle in name:
-                # Filter by device capability
-                if kind == 'output' and d.get('max_output_channels', 0) > 0:
-                    return idx
-                elif kind == 'input' and d.get('max_input_channels', 0) > 0:
-                    return idx
-                # If kind doesn't match, keep searching
-    return None
 
 
 def play_audio(path, output_device=None, interrupt_flag=None):
@@ -100,7 +75,7 @@ def play_audio(path, output_device=None, interrupt_flag=None):
         while elapsed < duration:
             if interrupt_flag.is_set():
                 sd.stop()
-                print("🛑 Playback interrupted!")
+                print("[STOP] Playback interrupted!")
                 return False
             time.sleep(check_interval)
             elapsed += check_interval
@@ -141,7 +116,23 @@ def sovits_gen(in_text, output_wav_pth = "output.wav"):
 
     except Exception as e:
         print(f"Error in sovits_gen: {e}")
-        return None
+        print("[TTS] Trying pyttsx3 fallback...")
+        return _fallback_tts(in_text, output_wav_pth)
+
+
+def _fallback_tts(text, output_wav_pth):
+    """Fallback TTS using pyttsx3 (Windows SAPI5) when GPT-SoVITS is unavailable."""
+    try:
+        import pyttsx3
+        engine = pyttsx3.init()
+        engine.setProperty('rate', 170)
+        engine.save_to_file(text, str(output_wav_pth))
+        engine.runAndWait()
+        if Path(output_wav_pth).exists() and Path(output_wav_pth).stat().st_size > 0:
+            return output_wav_pth
+    except Exception as e2:
+        print(f"[TTS] Fallback also failed: {e2}")
+    return None
 
 
 

@@ -2,6 +2,7 @@
 Speaker Identification module using Resemblyzer.
 Creates voice embeddings for known speakers and identifies who is talking.
 """
+import hashlib
 import numpy as np
 import soundfile as sf
 from pathlib import Path
@@ -11,6 +12,11 @@ from typing import Optional, Dict, Tuple
 _encoder = None
 _speaker_profiles: Dict[str, np.ndarray] = {}
 _profiles_loaded = False
+
+# Cache recent embeddings to avoid redundant encoder calls
+# Key: hash of audio bytes, Value: embedding ndarray
+_embedding_cache: Dict[str, np.ndarray] = {}
+_EMBEDDING_CACHE_MAX = 8
 
 
 def _get_encoder():
@@ -78,6 +84,8 @@ def create_embedding_from_audio(audio: np.ndarray, sample_rate: int = 16000) -> 
     Returns:
         256-dimensional embedding vector
     """
+    global _embedding_cache
+    
     encoder = _get_encoder()
     
     # Resemblyzer expects float audio normalized to [-1, 1]
@@ -89,12 +97,21 @@ def create_embedding_from_audio(audio: np.ndarray, sample_rate: int = 16000) -> 
         audio = audio / np.abs(audio).max()
     
     # Audio should already be 16000Hz - skip librosa resampling
-    # Just pass directly to encoder (avoids numba/librosa dependency issues)
     if sample_rate != 16000:
         raise ValueError(f"Audio must be 16000Hz, got {sample_rate}Hz")
     
+    # Check cache using hash of audio bytes
+    audio_hash = hashlib.sha256(audio.tobytes()[:32000]).hexdigest()[:16]
+    if audio_hash in _embedding_cache:
+        return _embedding_cache[audio_hash]
+    
     # Create embedding directly
     embedding = encoder.embed_utterance(audio)
+    
+    # Cache result (evict oldest if full)
+    if len(_embedding_cache) >= _EMBEDDING_CACHE_MAX:
+        _embedding_cache.pop(next(iter(_embedding_cache)))
+    _embedding_cache[audio_hash] = embedding
     
     return embedding
 

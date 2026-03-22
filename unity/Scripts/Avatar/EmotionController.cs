@@ -20,7 +20,6 @@ namespace Annabeth.Avatar
         private float _currentWeight;
         private float _targetWeight;
 
-        // Mapping of emotion strings to VRM expression keys
         private static readonly System.Collections.Generic.Dictionary<string, ExpressionKey> EmotionMap = 
             new System.Collections.Generic.Dictionary<string, ExpressionKey>
         {
@@ -33,8 +32,7 @@ namespace Annabeth.Avatar
             { "sorrow", ExpressionKey.Sad },
             { "surprised", ExpressionKey.Surprised },
             { "relaxed", ExpressionKey.Relaxed },
-            // Custom expressions (if available in VRM)
-            { "fun", ExpressionKey.Happy }, // Map to closest
+            { "fun", ExpressionKey.Happy },
             { "thinking", ExpressionKey.Neutral },
         };
 
@@ -48,38 +46,31 @@ namespace Annabeth.Avatar
         {
             if (_expression == null) return;
 
-            // Smooth transition between emotion weights
             _currentWeight = Mathf.Lerp(_currentWeight, _targetWeight, Time.deltaTime * transitionSpeed);
             
-            // Apply emotion (neutral is just 0 weight on all)
-            if (_currentKey != ExpressionKey.Neutral)
+            if (!_currentKey.Equals(ExpressionKey.Neutral))
             {
                 _expression.SetWeight(_currentKey, _currentWeight);
             }
         }
 
-        /// <summary>
-        /// Set the current emotion by name.
-        /// </summary>
         public void SetEmotion(string emotion)
         {
             emotion = emotion.ToLower().Trim();
             
             if (emotion == _currentEmotion) return;
 
-            // Clear previous emotion
-            if (_currentKey != ExpressionKey.Neutral)
+            if (!_currentKey.Equals(ExpressionKey.Neutral))
             {
                 _expression?.SetWeight(_currentKey, 0f);
             }
 
-            // Set new emotion
             _currentEmotion = emotion;
             
             if (EmotionMap.TryGetValue(emotion, out ExpressionKey key))
             {
                 _currentKey = key;
-                _targetWeight = key == ExpressionKey.Neutral ? 0f : defaultWeight;
+                _targetWeight = key.Equals(ExpressionKey.Neutral) ? 0f : defaultWeight;
             }
             else
             {
@@ -88,29 +79,20 @@ namespace Annabeth.Avatar
                 _targetWeight = 0f;
             }
 
-            _currentWeight = 0f; // Start transition from 0
+            _currentWeight = 0f;
         }
 
-        /// <summary>
-        /// Set emotion with specific weight.
-        /// </summary>
         public void SetEmotion(string emotion, float weight)
         {
             SetEmotion(emotion);
             _targetWeight = Mathf.Clamp01(weight);
         }
 
-        /// <summary>
-        /// Clear all emotions (return to neutral).
-        /// </summary>
         public void ClearEmotion()
         {
             SetEmotion("neutral");
         }
 
-        /// <summary>
-        /// Get the current emotion name.
-        /// </summary>
         public string GetCurrentEmotion() => _currentEmotion;
     }
 }

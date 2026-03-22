@@ -2,18 +2,20 @@
 ollama:
   host: http://localhost:11434
   # Uncensored models (recommended for roleplay):
-  #   mannix/llama3.1-8b-abliterated - Llama 3.1 with censorship removed (abliterated)
-  #   dolphin3:8b - Dolphin 3.0, designed to be uncensored/steerable
+  #   mannix/llama3.1-8b-abliterated - Llama 3.1 with censorship removed (abliterated) [CURRENT]
+  #   dolphin3:8b - Dolphin 3.0, designed to be uncensored/steerable (available locally)
+  # Lightweight/fast:
+  #   gemma3:4b - Google Gemma 3 4B, very fast, good quality for size (available locally)
   # Standard models:
-  #   qwen3:14b - Smartest but slowest
+  #   qwen3:14b - Smartest but slowest (wait for RAM+1 / 96GB)
   #   llama3.1:8b - Fast but censored
   model: mannix/llama3.1-8b-abliterated
   # Keep model loaded in memory for faster responses (in seconds, -1 = forever)
   keep_alive: 3600
   # Enable streaming for faster first response
   stream: true
-  # Reduce context for faster generation (2048 is enough for chat)
-  num_ctx: 2048
+  # Context window — 3072 is safe for 8B model on 16GB VRAM
+  num_ctx: 3072
 
 # RAM-based response cache for faster repeated queries
 # Caches recent query-response pairs to avoid regenerating similar responses
@@ -22,10 +24,17 @@ response_cache:
   # Maximum number of responses to cache (uses ~1KB per entry)
   max_entries: 100
 
+# Tool calling (Phase 5) — Gives Annabeth ability to use tools
+# (web search, memory, time/date, self-modification)
+tools:
+  enabled: true
+  # Timeout per tool execution (seconds)
+  timeout_sec: 10
+
 history_file: chat_history.json
 model: "mannix/llama3.1-8b-abliterated"
-# Reduced from 15 to 8 for faster LLM response (smaller context window)
-max_history_turns: 8
+# 12 turns with 3072 ctx — good balance of memory vs speed
+max_history_turns: 12
 
 # Windows/local runtime settings
 audio:
@@ -56,7 +65,12 @@ vad:
   # If you're getting false triggers from background noise, increase this to 3
   aggressiveness: 3
   # How long to wait after you stop speaking before processing (seconds)
-  silence_threshold_sec: 1.0
+  silence_threshold_sec: 0.6
+  # Minimum audio volume (RMS energy) for the MAIN speech detector
+  # Filters out quiet ambient noise that fools webrtcvad into triggering
+  # Range: 0-32768 (0 = disabled, 300 = moderate, 500 = requires clear speech)
+  # Increase if you see constant "Too short, ignoring..." in the console
+  min_energy: 300
   
   # ========== Interrupt Detection Settings ==========
   # These control how Annabeth detects when you want to interrupt her
@@ -68,14 +82,14 @@ vad:
   # Number of consecutive speech frames needed to trigger interrupt
   # At 30ms per frame: 15 frames = ~450ms of sustained speech required
   # Increase this if you're still getting false interrupts (try 20-25)
-  interrupt_speech_frames: 15
+  interrupt_speech_frames: 25
   
   # Minimum audio volume (RMS energy) to even consider as potential speech
   # This filters out quiet background noise before VAD even checks it
   # Range: 0-32768 (higher = requires louder speech to interrupt)
   # 500 = moderate, 1000 = requires clearly audible speech
   # Increase this if background noise keeps triggering interrupts
-  interrupt_min_energy: 800
+  interrupt_min_energy: 1500
 
 # Speaker Identification settings
 # Allows Annabeth to know WHO is speaking (e.g., you vs your daughter)
@@ -110,6 +124,13 @@ presets:
       - NEVER use ALL CAPS for emphasis
       - Keep responses conversational and concise (1-3 sentences usually)
       - Your text will be read aloud by a text-to-speech system, so write exactly what should be spoken
+      - NEVER repeat a previous response. Each reply must be unique and address what was just said.
+      
+      TOOLS:
+      - You sometimes receive tool results (time, web search, memories) as system messages
+      - When you see tool results, incorporate them naturally into your response
+      - Don't say "according to my search" or "my tools tell me" — just state the info naturally
+      - If told a memory was stored, briefly acknowledge it (e.g. "Got it, I'll remember that!")
 
 sovits_ping_config:
   text_lang: en

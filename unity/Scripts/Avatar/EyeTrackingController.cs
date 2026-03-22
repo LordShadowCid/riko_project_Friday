@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 using UniVRM10;
 
 namespace Annabeth.Avatar
@@ -33,17 +34,25 @@ namespace Annabeth.Avatar
                 mainCamera = Camera.main;
             }
 
-            // Create look-at target
+            // Create look-at target (not parented to avatar to avoid
+            // any influence from model hierarchy)
             var targetObj = new GameObject("EyeTrackTarget");
             _lookAtTarget = targetObj.transform;
-            _lookAtTarget.SetParent(transform);
-            _lookAtTarget.localPosition = Vector3.forward * lookAtDistance;
+
+            // Initialize _currentLookAt to camera position so we don't
+            // lerp from Vector3.zero (would cause initial head jerk)
+            if (mainCamera != null)
+            {
+                _currentLookAt = mainCamera.transform.position;
+                _targetLookAt = _currentLookAt;
+                _lookAtTarget.position = _currentLookAt;
+            }
 
             // Configure VRM LookAt
-            if (_vrm != null && _vrm.Vrm.LookAt != null)
+            if (_vrm != null)
             {
-                _vrm.Vrm.LookAt.LookAtTargetType = VRM10ObjectLookAt.LookAtTargetTypes.SpecifiedTransform;
-                _vrm.Vrm.LookAt.LookAtTarget = _lookAtTarget;
+                _vrm.LookAtTargetType = VRM10ObjectLookAt.LookAtTargetTypes.SpecifiedTransform;
+                _vrm.LookAtTarget = _lookAtTarget;
             }
         }
 
@@ -56,32 +65,28 @@ namespace Annabeth.Avatar
 
         private void UpdateLookAtTarget()
         {
-            // Get mouse position in screen space
-            Vector3 mousePos = Input.mousePosition;
+            Vector3 mousePos = Mouse.current != null ? Mouse.current.position.ReadValue() : Vector3.zero;
             
-            // Convert to normalized screen coordinates (-1 to 1)
             float normalizedX = (mousePos.x / Screen.width - 0.5f) * 2f;
             float normalizedY = (mousePos.y / Screen.height - 0.5f) * 2f;
 
-            // Calculate target position in world space (in front of avatar)
             Transform headBone = GetHeadBone();
             if (headBone == null) return;
 
             Vector3 headPos = headBone.position;
-            Vector3 headForward = headBone.forward;
-            Vector3 headRight = headBone.right;
-            Vector3 headUp = headBone.up;
 
-            // Calculate horizontal and vertical offsets based on mouse position
+            // Use direction from head toward camera as the stable base direction.
+            // Do NOT use headBone.forward — LookAt rotates the head bone, which
+            // moves the target, creating a feedback loop (slow 360° spin).
+            Vector3 toCamera = (mainCamera.transform.position - headPos).normalized;
+
             float horizontalOffset = normalizedX * Mathf.Tan(maxHorizontalAngle * Mathf.Deg2Rad) * lookAtDistance;
             float verticalOffset = normalizedY * Mathf.Tan(maxVerticalAngle * Mathf.Deg2Rad) * lookAtDistance;
 
-            // Target position in front of head, offset by mouse position
-            _targetLookAt = headPos + headForward * lookAtDistance +
-                           headRight * horizontalOffset +
-                           headUp * verticalOffset;
+            _targetLookAt = headPos + toCamera * lookAtDistance +
+                           mainCamera.transform.right * horizontalOffset +
+                           mainCamera.transform.up * verticalOffset;
 
-            // Smooth movement
             _currentLookAt = Vector3.Lerp(_currentLookAt, _targetLookAt, Time.deltaTime * lookAtSpeed);
             _lookAtTarget.position = _currentLookAt;
         }
@@ -94,27 +99,22 @@ namespace Annabeth.Avatar
             return animator?.GetBoneTransform(HumanBodyBones.Head);
         }
 
-        /// <summary>
-        /// Enable or disable eye tracking.
-        /// </summary>
         public void SetEnabled(bool enabled)
         {
             enableEyeTracking = enabled;
 
             if (!enabled && _vrm?.Vrm.LookAt != null)
             {
-                // Reset to looking forward
+                // Reset target to in front of face using camera direction (not headBone.forward)
                 var headBone = GetHeadBone();
-                if (headBone != null && _lookAtTarget != null)
+                if (headBone != null && _lookAtTarget != null && mainCamera != null)
                 {
-                    _lookAtTarget.position = headBone.position + headBone.forward * lookAtDistance;
+                    Vector3 toCamera = (mainCamera.transform.position - headBone.position).normalized;
+                    _lookAtTarget.position = headBone.position + toCamera * lookAtDistance;
                 }
             }
         }
 
-        /// <summary>
-        /// Set a specific world position to look at.
-        /// </summary>
         public void LookAt(Vector3 worldPosition)
         {
             _targetLookAt = worldPosition;

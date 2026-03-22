@@ -66,12 +66,10 @@ namespace Annabeth.Avatar
             float blinkWeight;
             if (_blinkProgress < 0.5f)
             {
-                // Closing eyes (0 to 1)
                 blinkWeight = _blinkProgress * 2f;
             }
             else
             {
-                // Opening eyes (1 to 0)
                 blinkWeight = (1f - _blinkProgress) * 2f;
             }
 
@@ -90,9 +88,6 @@ namespace Annabeth.Avatar
             ScheduleNextBlink();
         }
 
-        /// <summary>
-        /// Trigger a single blink immediately.
-        /// </summary>
         public void TriggerBlink()
         {
             if (!_isBlinking)
@@ -101,9 +96,6 @@ namespace Annabeth.Avatar
             }
         }
 
-        /// <summary>
-        /// Enable or disable automatic blinking.
-        /// </summary>
         public void SetAutoBlinkEnabled(bool enabled)
         {
             autoBlinkEnabled = enabled;
