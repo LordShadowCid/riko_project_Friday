@@ -1076,33 +1076,91 @@ def llm_response_streaming(user_input, on_sentence: Callable[[str], None] = None
                 on_sentence(full_text)
             break
         else:
-            # STREAMING PATH: Stream directly to TTS (no prefix buffering).
-            # The user hears the response in real-time — we cannot un-play it.
-            # Post-generation checks are therefore ADVISORY ONLY: we save the
-            # real (sanitized) response to history so there's no mismatch between
-            # what the user heard and what the model sees next turn.
+            # STREAMING PATH with early-abort repeat detection.
+            # Buffer sentences until we accumulate enough text (~40 chars)
+            # to reliably compare against recent responses. Only then
+            # release the buffered sentences to TTS. This catches short
+            # first sentences like "Um, okay." that would slip past a
+            # per-sentence check.
             full_text = ""
+            early_abort = False
+            prefix_checked = False
+            buffered_sentences = []  # Hold back until prefix check passes
+            _EARLY_CHECK_LEN = 40   # Chars needed before we can check
 
             for sentence in stream_ollama_response(llm_messages, temp_boost=temp_boost):
                 if not full_text:
                     full_text = sentence
                 else:
                     full_text += " " + sentence
+
+                # --- Early repeat detection: buffer until enough text ---
+                if not prefix_checked:
+                    buffered_sentences.append(sentence)
+                    prefix_so_far = full_text.strip().lower()
+
+                    if len(prefix_so_far) >= _EARLY_CHECK_LEN and recent_responses:
+                        from difflib import SequenceMatcher as _SM2
+                        for prev in recent_responses:
+                            if len(prev) < _EARLY_CHECK_LEN:
+                                continue
+                            check_len = min(len(prefix_so_far), len(prev))
+                            ratio = _SM2(None, prefix_so_far[:check_len], prev[:check_len]).ratio()
+                            if ratio >= 0.75:
+                                early_abort = True
+                                print(f"[LLM] Early repeat detected after {len(buffered_sentences)} sentence(s), {len(prefix_so_far)} chars (ratio={ratio:.2f}) -- aborting")
+                                break
+
+                        if early_abort:
+                            break
+
+                        # Passed! Flush all buffered sentences to TTS
+                        prefix_checked = True
+                        if on_sentence:
+                            for buf_s in buffered_sentences:
+                                on_sentence(buf_s)
+                        buffered_sentences = []
+                        continue
+                    else:
+                        # Not enough text yet — keep buffering
+                        continue
+
+                # Subsequent sentences stream normally
                 if on_sentence:
                     on_sentence(sentence)
 
+            # If we never reached the check threshold (very short response),
+            # flush whatever we buffered
+            if not prefix_checked and not early_abort and buffered_sentences:
+                if on_sentence:
+                    for buf_s in buffered_sentences:
+                        on_sentence(buf_s)
+
             full_text = full_text.strip()
 
-            # Post-generation checks.
+            if early_abort:
+                if attempt < max_retries:
+                    temp_boost += 0.25
+                    llm_messages = _build_llm_messages(messages, inject_memories=False)
+                    llm_messages = _dedup_history(llm_messages)
+                    print(f"[LLM] Retrying with temp_boost={temp_boost} (attempt {attempt+1})")
+                    continue
+                else:
+                    print(f"[LLM] Repeat persisted after retries -- using fallback")
+                    full_text = _pick_fallback()
+                    is_repeat = False  # fallback is fine to save
+                    if on_sentence:
+                        on_sentence(full_text)
+                    break
+
+            # Post-generation checks (for cases that slip past early detection).
             is_gibberish_flag = _is_gibberish(full_text)
             is_repeat = _is_repetition(full_text, recent_responses, threshold=0.90)
 
             if is_gibberish_flag:
-                print(f"[LLM] WARNING: Gibberish streamed to user \u2014 will be sanitized in history")
+                print(f"[LLM] WARNING: Gibberish streamed to user -- will be sanitized in history")
             if is_repeat:
-                # Do NOT save repeated responses to history \u2014 this breaks the
-                # reinforcement loop where the model copies its own context.
-                print(f"[LLM] WARNING: Repeat streamed to user \u2014 NOT saving to history")
+                print(f"[LLM] WARNING: Repeat streamed to user -- NOT saving to history")
 
             break
 

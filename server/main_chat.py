@@ -10,10 +10,10 @@ Handles:
 from server.process.asr_func.asr_push_to_talk import record_and_transcribe, transcribe_file
 from server.process.asr_func.asr_vad import (
     record_vad_and_transcribe, 
-    BackgroundListener,
     get_interrupt_flag,
     get_speaking_flag,
 )
+import keyboard
 from server.process.llm_funcs.llm_scr import llm_response, llm_response_streaming
 from server.process.tts_func.sovits_ping import sovits_gen, play_audio
 from server.process.read_aloud.text_capture import estimate_word_timings, capture_selected_text
@@ -316,12 +316,13 @@ def clean_text_for_tts(text: str) -> str:
 # READ ALOUD FUNCTIONALITY
 # =============================================================================
 
-def process_read_aloud_queue(output_device, bg_listener) -> bool:
+def process_read_aloud_queue(output_device) -> bool:
     """
     Process pending read-aloud sentences with pre-buffering.
     
     Uses a background thread to pre-generate TTS for the NEXT sentence
     while the current one is playing, eliminating gaps.
+    Interruption is via Ctrl+Shift+X hotkey (interrupt flag polled by play_audio).
     
     Returns True if read-aloud was processed, False otherwise.
     """
@@ -449,10 +450,9 @@ def process_read_aloud_queue(output_device, bg_listener) -> bool:
         # Notify avatar
         avatar_speak_start(cleaned)
         
-        # Start background listener for interruption
+        # Set speaking flag (Ctrl+Shift+X hotkey sets interrupt flag)
         get_interrupt_flag().clear()
         get_speaking_flag().set()
-        bg_listener.start()
         
         # START PREFETCH FOR NEXT SENTENCE (runs in parallel with playback!)
         next_idx = read_aloud.state.current_index + 1
@@ -466,8 +466,6 @@ def process_read_aloud_queue(output_device, bg_listener) -> bool:
             interrupt_flag=get_interrupt_flag(),
         )
         
-        # Stop listener
-        bg_listener.stop()
         get_speaking_flag().clear()
         
         # Cleanup this audio file
@@ -576,10 +574,6 @@ vad_aggressiveness = vad_cfg.get('aggressiveness', 3)  # 0-3, higher = more aggr
 silence_threshold = vad_cfg.get('silence_threshold_sec', 1.0)
 vad_min_energy = vad_cfg.get('min_energy', 300)  # Minimum RMS energy to consider as speech (filters noise)
 # Interrupt detection settings - higher values = less sensitive (fewer false interrupts)
-interrupt_aggressiveness = vad_cfg.get('interrupt_aggressiveness', 3)  # Max filtering for interrupts
-interrupt_speech_frames = vad_cfg.get('interrupt_speech_frames', 15)  # ~450ms of sustained speech needed
-interrupt_min_energy = vad_cfg.get('interrupt_min_energy', 500)  # Minimum volume to trigger interrupt
-
 # Speaker identification settings
 speaker_id_cfg = char_config.get('speaker_id', {}) or {}
 use_speaker_id = speaker_id_cfg.get('enabled', True)
@@ -598,18 +592,19 @@ _startup_self_check(char_config, input_device, output_device, whisper_cfg)
 if use_vad:
     print("\n[MIC] HANDS-FREE MODE enabled - just start speaking!")
     print("   (Annabeth will listen and respond automatically)")
-    print("   (You can interrupt her while she's speaking)\n")
+    print("   (Press Ctrl+Shift+X to interrupt her while she's speaking)\n")
 else:
     print("\n[PTT] PUSH-TO-TALK MODE - press ENTER to record\n")
 
-# Background listener for interruption detection (uses stricter settings to avoid false triggers)
-bg_listener = BackgroundListener(
-    input_device=input_device,
-    sample_rate=16000,
-    vad_aggressiveness=interrupt_aggressiveness,
-    speech_frames_threshold=interrupt_speech_frames,
-    min_audio_energy=interrupt_min_energy,
-)
+# Hotkey-based interruption (replaces mic-based BackgroundListener)
+# Ctrl+Shift+X sets the interrupt flag; play_audio() polls it every 50ms.
+def _hotkey_interrupt():
+    flag = get_interrupt_flag()
+    if get_speaking_flag().is_set():
+        flag.set()
+        print("[STOP] Hotkey interrupt!")
+
+keyboard.add_hotkey('ctrl+shift+x', _hotkey_interrupt, suppress=False)
 
 _prev_llm_thread = None  # Track previous LLM thread for join-on-interrupt
 
@@ -619,7 +614,7 @@ while True:
     # =========================================================================
     # Process any pending read-aloud sentences before checking for new input
     try:
-        if process_read_aloud_queue(output_device, bg_listener):
+        if process_read_aloud_queue(output_device):
             # Read-aloud was processed
             read_aloud = get_read_aloud_manager()
             if read_aloud.state.is_paused:
@@ -907,20 +902,16 @@ while True:
             if first_sentence or not get_speaking_flag().is_set():
                 avatar_speak_start(sentence)
             
-            # Start background listener for interruption
+            # Set speaking flag and clear interrupt before each sentence
             get_interrupt_flag().clear()
             get_speaking_flag().set()
-            bg_listener.start()
             
-            # Play audio with interruption support
+            # Play audio with interruption support (Ctrl+Shift+X to interrupt)
             was_interrupted = not play_audio(
                 output_wav_path, 
                 output_device=output_device,
                 interrupt_flag=get_interrupt_flag(),
             )
-            
-            # Stop background listener
-            bg_listener.stop()
             
             # Clean up this audio file
             try:
