@@ -2,6 +2,7 @@ using UnityEngine;
 using Annabeth.Core;
 using Annabeth.Avatar;
 using Annabeth.Dance;
+using Annabeth.Interaction;
 
 namespace Annabeth
 {
@@ -26,6 +27,9 @@ namespace Annabeth
         [Header("Dance Components")]
         [SerializeField] private BeatDanceController beatDanceController;
         [SerializeField] private VrmaAnimationController vrmaAnimationController;
+
+        [Header("Interaction")]
+        [SerializeField] private TouchReactionController touchReactionController;
 
         [Header("State")]
         [SerializeField] private CompanionMode currentMode = CompanionMode.Idle;
@@ -114,6 +118,13 @@ namespace Annabeth
             if (idleAnimationController != null)
             {
                 idleAnimationController.Initialize(vrm);
+            }
+
+            // Initialize touch reactions
+            touchReactionController = avatarController.GetComponentInChildren<TouchReactionController>();
+            if (touchReactionController != null)
+            {
+                touchReactionController.Initialize(vrm);
             }
         }
 
