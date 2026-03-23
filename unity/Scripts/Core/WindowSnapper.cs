@@ -79,7 +79,7 @@ namespace Annabeth.Core
             if (_hwnd == IntPtr.Zero) return;
 
             // Double right-click to sit on taskbar
-            if (Input.GetMouseButtonDown(1))
+            if (UnityEngine.Input.GetMouseButtonDown(1))
             {
                 if (_doubleClickTimer > 0f)
                 {
@@ -95,7 +95,7 @@ namespace Annabeth.Core
                 _doubleClickTimer -= Time.deltaTime;
 
             // Home key to cycle snap positions
-            if (Input.GetKeyDown(snapCycleKey))
+            if (UnityEngine.Input.GetKeyDown(snapCycleKey))
             {
                 CycleSnapPosition();
             }
