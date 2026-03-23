@@ -20,6 +20,7 @@ namespace Annabeth.Interaction
         private Vrm10Instance _vrm;
         private Vrm10RuntimeExpression _expression;
         private Camera _cam;
+        private SkinnedMeshRenderer[] _renderers;
 
         private float _reactionTimer;
         private float _cooldownTimer;
@@ -49,11 +50,13 @@ namespace Annabeth.Interaction
             _expression = vrm?.Runtime?.Expression;
             _cam = Camera.main;
 
+            // Cache renderers for raycasting (avoids per-click allocation)
+            _renderers = vrm.GetComponentsInChildren<SkinnedMeshRenderer>();
+
             // Estimate head zone: top 25% of model height
-            var renderers = vrm.GetComponentsInChildren<SkinnedMeshRenderer>();
             float maxY = float.MinValue;
             float minY = float.MaxValue;
-            foreach (var r in renderers)
+            foreach (var r in _renderers)
             {
                 var bounds = r.bounds;
                 if (bounds.max.y > maxY) maxY = bounds.max.y;
@@ -113,14 +116,13 @@ namespace Annabeth.Interaction
             Ray ray = _cam.ScreenPointToRay(mousePos);
 
             // Raycast against all colliders/mesh renderers in the VRM hierarchy
-            if (_vrm == null) return;
+            if (_vrm == null || _renderers == null) return;
 
-            var renderers = _vrm.GetComponentsInChildren<SkinnedMeshRenderer>();
             float closestDist = float.MaxValue;
             Vector3 hitPoint = Vector3.zero;
             bool hit = false;
 
-            foreach (var r in renderers)
+            foreach (var r in _renderers)
             {
                 if (r.bounds.IntersectRay(ray, out float dist) && dist < closestDist)
                 {

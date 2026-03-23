@@ -18,6 +18,7 @@ namespace Annabeth.Avatar
         private Vrm10RuntimeExpression _expression;
         private bool _isSpeaking;
         private int _currentVowelIndex;
+        private int _previousVowelIndex = -1;
         private float _vowelTimer;
         private float _targetWeight;
         private float _currentWeight;
@@ -76,17 +77,22 @@ namespace Annabeth.Avatar
 
         private void ApplyCurrentVowel()
         {
-            // Reset all vowels first
-            foreach (var key in _vowelKeys)
+            // Clear only the previous vowel (instead of all 5 every frame)
+            if (_previousVowelIndex >= 0 && _previousVowelIndex != _currentVowelIndex)
             {
-                _expression.SetWeight(key, 0f);
+                _expression.SetWeight(_vowelKeys[_previousVowelIndex], 0f);
             }
 
-            // Apply current vowel with weight
             if (_currentWeight > 0.01f)
             {
                 _expression.SetWeight(_vowelKeys[_currentVowelIndex], _currentWeight);
             }
+            else if (_previousVowelIndex >= 0)
+            {
+                _expression.SetWeight(_vowelKeys[_currentVowelIndex], 0f);
+            }
+
+            _previousVowelIndex = _currentVowelIndex;
         }
 
         public void StartSpeaking()

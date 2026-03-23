@@ -24,6 +24,7 @@ namespace Annabeth.Avatar
         private Transform _lookAtTarget;
         private Vector3 _currentLookAt;
         private Vector3 _targetLookAt;
+        private Transform _headBone;
 
         public void Initialize(Vrm10Instance vrm)
         {
@@ -33,6 +34,10 @@ namespace Annabeth.Avatar
             {
                 mainCamera = Camera.main;
             }
+
+            // Cache head bone for per-frame use
+            var animator = vrm?.GetComponent<Animator>();
+            _headBone = animator?.GetBoneTransform(HumanBodyBones.Head);
 
             // Create look-at target (not parented to avatar to avoid
             // any influence from model hierarchy)
@@ -70,10 +75,9 @@ namespace Annabeth.Avatar
             float normalizedX = (mousePos.x / Screen.width - 0.5f) * 2f;
             float normalizedY = (mousePos.y / Screen.height - 0.5f) * 2f;
 
-            Transform headBone = GetHeadBone();
-            if (headBone == null) return;
+            if (_headBone == null) return;
 
-            Vector3 headPos = headBone.position;
+            Vector3 headPos = _headBone.position;
 
             // Use direction from head toward camera as the stable base direction.
             // Do NOT use headBone.forward — LookAt rotates the head bone, which
@@ -93,10 +97,7 @@ namespace Annabeth.Avatar
 
         private Transform GetHeadBone()
         {
-            if (_vrm == null) return null;
-            
-            var animator = _vrm.GetComponent<Animator>();
-            return animator?.GetBoneTransform(HumanBodyBones.Head);
+            return _headBone;
         }
 
         public void SetEnabled(bool enabled)

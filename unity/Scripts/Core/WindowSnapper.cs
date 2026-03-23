@@ -54,6 +54,8 @@ namespace Annabeth.Core
         private int _taskbarH;
         private float _doubleClickTimer;
         private const float DoubleClickWindow = 0.4f;
+        private float _snapCheckTimer;
+        private const float SnapCheckInterval = 0.05f; // 20 Hz instead of every frame
 
         private void Start()
         {
@@ -102,7 +104,12 @@ namespace Annabeth.Core
         private void LateUpdate()
         {
             if (_hwnd == IntPtr.Zero) return;
-            ApplyEdgeSnap();
+            _snapCheckTimer -= Time.deltaTime;
+            if (_snapCheckTimer <= 0f)
+            {
+                _snapCheckTimer = SnapCheckInterval;
+                ApplyEdgeSnap();
+            }
         }
 
         private void ApplyEdgeSnap()

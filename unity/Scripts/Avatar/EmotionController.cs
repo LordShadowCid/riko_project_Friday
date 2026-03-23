@@ -19,6 +19,7 @@ namespace Annabeth.Avatar
         private ExpressionKey _currentKey = ExpressionKey.Neutral;
         private float _currentWeight;
         private float _targetWeight;
+        private bool _emotionActive;
 
         private static readonly System.Collections.Generic.Dictionary<string, ExpressionKey> EmotionMap = 
             new System.Collections.Generic.Dictionary<string, ExpressionKey>
@@ -44,13 +45,16 @@ namespace Annabeth.Avatar
 
         private void Update()
         {
-            if (_expression == null) return;
+            if (_expression == null || !_emotionActive) return;
 
             _currentWeight = Mathf.Lerp(_currentWeight, _targetWeight, Time.deltaTime * transitionSpeed);
-            
-            if (!_currentKey.Equals(ExpressionKey.Neutral))
+            _expression.SetWeight(_currentKey, _currentWeight);
+
+            // Stop updating once fully faded out
+            if (_targetWeight <= 0f && _currentWeight < 0.001f)
             {
-                _expression.SetWeight(_currentKey, _currentWeight);
+                _expression.SetWeight(_currentKey, 0f);
+                _emotionActive = false;
             }
         }
 
@@ -70,12 +74,14 @@ namespace Annabeth.Avatar
             if (EmotionMap.TryGetValue(emotion, out ExpressionKey key))
             {
                 _currentKey = key;
-                _targetWeight = key.Equals(ExpressionKey.Neutral) ? 0f : defaultWeight;
+                _emotionActive = !key.Equals(ExpressionKey.Neutral);
+                _targetWeight = _emotionActive ? defaultWeight : 0f;
             }
             else
             {
                 Debug.LogWarning($"[EmotionController] Unknown emotion: {emotion}");
                 _currentKey = ExpressionKey.Neutral;
+                _emotionActive = false;
                 _targetWeight = 0f;
             }
 
