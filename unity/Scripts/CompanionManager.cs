@@ -129,6 +129,10 @@ namespace Annabeth
             {
                 touchReactionController.Initialize(vrm);
             }
+
+            // Apply user settings to all controllers now that VRM is ready
+            if (SettingsManager.Instance != null)
+                SettingsManager.Instance.ApplyAllSettings();
         }
 
         // ── Event Handlers ──────────────────────────────────────────

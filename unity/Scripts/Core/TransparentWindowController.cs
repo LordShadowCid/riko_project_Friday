@@ -2,6 +2,7 @@ using System;
 using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.Rendering.Universal;
+using Annabeth.UI;
 
 namespace Annabeth.Core
 {
@@ -130,6 +131,14 @@ namespace Annabeth.Core
 
             // While dragging, always capture clicks
             if (_dragging)
+            {
+                if (_clickThroughActive)
+                    SetClickThroughInternal(false);
+                return;
+            }
+
+            // While any UI panel is open, always capture clicks so user can interact with UI
+            if (UI.RadialMenu.IsAnyPanelOpen)
             {
                 if (_clickThroughActive)
                     SetClickThroughInternal(false);

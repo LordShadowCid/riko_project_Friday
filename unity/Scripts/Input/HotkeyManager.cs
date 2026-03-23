@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 using Annabeth.Core;
+using Annabeth.UI;
 
 namespace Annabeth.Input
 {
@@ -39,6 +40,10 @@ namespace Annabeth.Input
         {
             var kb = Keyboard.current;
             if (kb == null) return;
+
+            // Block most hotkeys while UI panels are open
+            if (RadialMenu.IsAnyPanelOpen)
+                return;
 
             bool ctrl = kb.leftCtrlKey.isPressed || kb.rightCtrlKey.isPressed;
             bool shift = kb.leftShiftKey.isPressed || kb.rightShiftKey.isPressed;
