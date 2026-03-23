@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 using UniVRM10;
 
 namespace Annabeth.Interaction
@@ -98,8 +99,9 @@ namespace Annabeth.Interaction
                 }
             }
 
-            // Detect click
-            if (Input.GetMouseButtonDown(0) && _cooldownTimer <= 0f && !_reacting)
+            // Detect click (InputSystem)
+            var mouse = Mouse.current;
+            if (mouse != null && mouse.leftButton.wasPressedThisFrame && _cooldownTimer <= 0f && !_reacting)
             {
                 TryTouch();
             }
@@ -107,7 +109,8 @@ namespace Annabeth.Interaction
 
         private void TryTouch()
         {
-            Ray ray = _cam.ScreenPointToRay(Input.mousePosition);
+            var mousePos = Mouse.current?.position.ReadValue() ?? Vector2.zero;
+            Ray ray = _cam.ScreenPointToRay(mousePos);
 
             // Raycast against all colliders/mesh renderers in the VRM hierarchy
             if (_vrm == null) return;
