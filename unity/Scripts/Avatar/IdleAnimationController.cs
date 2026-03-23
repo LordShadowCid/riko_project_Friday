@@ -9,7 +9,7 @@ namespace Annabeth.Avatar
     /// Ported from companion.html applyIdleAnimation() with Mate-Engine style awareness.
     /// Runs in LateUpdate so it layers on top of other controllers.
     /// </summary>
-    public class IdleAnimationController : MonoBehaviour
+    public class IdleAnimationController : MonoBehaviour, IBlendableAnimation
     {
         [Header("Breathing")]
         [SerializeField] private float breathSpeed = 0.8f;
@@ -36,9 +36,19 @@ namespace Annabeth.Avatar
         private float _idleTime;
         private float _headPhaseOffset;
         private bool _enabled = true;
+        private float _blendWeight = 1f;
         private Camera _cam;
         private float _currentLeanX;
         private float _currentLeanZ;
+
+        // IBlendableAnimation
+        public float BlendWeight => _blendWeight;
+        public void SetBlendWeight(float weight) => _blendWeight = weight;
+        public void SetBlendActive(bool active)
+        {
+            _enabled = active;
+            if (!active) _blendWeight = 0f;
+        }
 
         public void Initialize(Vrm10Instance vrm)
         {
@@ -63,15 +73,17 @@ namespace Annabeth.Avatar
 
         private void LateUpdate()
         {
-            if (!_enabled || _vrm == null) return;
+            if (!_enabled || _blendWeight <= 0f || _vrm == null) return;
 
             _idleTime += Time.deltaTime;
+            float w = _blendWeight;
 
             // Subtle breathing on spine
             if (_spine)
             {
                 float breathX = Mathf.Sin(_idleTime * breathSpeed) * breathAmplitude;
-                _spine.localRotation = _origSpine * Quaternion.Euler(breathX * Mathf.Rad2Deg, 0, 0);
+                Quaternion target = _origSpine * Quaternion.Euler(breathX * Mathf.Rad2Deg, 0, 0);
+                _spine.localRotation = Quaternion.Slerp(_origSpine, target, w);
             }
 
             // Gentle head drift — apply from captured base rotation to prevent
@@ -80,7 +92,8 @@ namespace Annabeth.Avatar
             {
                 float driftY = Mathf.Sin(_idleTime * headDriftSpeedY + _headPhaseOffset) * headDriftAmplitudeY;
                 float driftX = Mathf.Sin(_idleTime * headDriftSpeedX + _headPhaseOffset) * headDriftAmplitudeX;
-                _head.localRotation = _origHead * Quaternion.Euler(driftX * Mathf.Rad2Deg, driftY * Mathf.Rad2Deg, 0);
+                Quaternion target = _origHead * Quaternion.Euler(driftX * Mathf.Rad2Deg, driftY * Mathf.Rad2Deg, 0);
+                _head.localRotation = Quaternion.Slerp(_origHead, target, w);
             }
 
             // Body lean toward mouse — subtle upper body tilt
@@ -101,7 +114,8 @@ namespace Annabeth.Avatar
                     _currentLeanZ = Mathf.Lerp(_currentLeanZ, targetLeanZ, Time.deltaTime * leanSmoothSpeed);
                     _currentLeanX = Mathf.Lerp(_currentLeanX, targetLeanX, Time.deltaTime * leanSmoothSpeed);
 
-                    _upperBody.localRotation = _origUpperBody * Quaternion.Euler(_currentLeanX, 0, _currentLeanZ);
+                    Quaternion target = _origUpperBody * Quaternion.Euler(_currentLeanX, 0, _currentLeanZ);
+                    _upperBody.localRotation = Quaternion.Slerp(_origUpperBody, target, w);
                 }
             }
         }

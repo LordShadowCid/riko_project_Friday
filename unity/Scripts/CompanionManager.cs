@@ -28,6 +28,9 @@ namespace Annabeth
         [SerializeField] private BeatDanceController beatDanceController;
         [SerializeField] private VrmaAnimationController vrmaAnimationController;
 
+        [Header("Animation Blending")]
+        [SerializeField] private AnimationBlendController animationBlendController;
+
         [Header("Interaction")]
         [SerializeField] private TouchReactionController touchReactionController;
 
@@ -161,8 +164,8 @@ namespace Annabeth
             switch (previousMode)
             {
                 case CompanionMode.Dance:
-                    beatDanceController?.StopDancing();
                     vrmaAnimationController?.Stop();
+                    // beatDanceController cleanup handled by blend completion
                     break;
             }
 
@@ -171,25 +174,47 @@ namespace Annabeth
             {
                 case CompanionMode.Active:
                     eyeTrackingController?.SetEnabled(true);
-                    idleAnimationController?.SetEnabled(true);
+                    TransitionAnimation(beatDanceController, idleAnimationController);
                     break;
 
                 case CompanionMode.Idle:
                     eyeTrackingController?.SetEnabled(true);
-                    idleAnimationController?.SetEnabled(true);
+                    TransitionAnimation(beatDanceController, idleAnimationController);
                     emotionController?.ClearEmotion();
                     break;
 
                 case CompanionMode.Dance:
-                    idleAnimationController?.SetEnabled(false);
                     if (currentDanceStyle == DanceStyle.Procedural)
                     {
                         beatDanceController?.StartDancing();
+                        TransitionAnimation(idleAnimationController, beatDanceController);
+                    }
+                    else
+                    {
+                        idleAnimationController?.SetEnabled(false);
                     }
                     break;
             }
 
             Debug.Log($"[CompanionManager] Mode changed: {previousMode} → {mode}");
+        }
+
+        /// <summary>
+        /// Smooth crossfade between animation controllers, with hard-switch fallback.
+        /// </summary>
+        private void TransitionAnimation(IBlendableAnimation from, IBlendableAnimation to)
+        {
+            if (animationBlendController != null && from != null && to != null)
+            {
+                animationBlendController.Crossfade(from, to);
+            }
+            else
+            {
+                from?.SetBlendActive(false);
+                from?.SetBlendWeight(0f);
+                to?.SetBlendActive(true);
+                to?.SetBlendWeight(1f);
+            }
         }
 
         private void HandleSilenceToggle(bool silenced)
@@ -240,10 +265,16 @@ namespace Annabeth
                     case DanceStyle.Procedural:
                         vrmaAnimationController?.Stop();
                         beatDanceController?.StartDancing();
+                        TransitionAnimation(idleAnimationController, beatDanceController);
                         break;
 
                     case DanceStyle.ShikanokoDance:
                         beatDanceController?.StopDancing();
+                        if (animationBlendController != null)
+                        {
+                            beatDanceController?.SetBlendActive(false);
+                            beatDanceController?.SetBlendWeight(0f);
+                        }
                         _vrmaAudioPaused = true; // Start paused until music detected
                         _ = PlayVrmaAnimation("shikanoko_dance.vrma");
                         break;
