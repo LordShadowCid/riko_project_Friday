@@ -30,11 +30,16 @@ namespace Annabeth.Avatar
         {
             if (loadOnStart)
             {
-                await LoadVRM(vrmPath);
+                // Check for user-saved model path first
+                string savedPath = Core.SettingsManager.Instance?.data.selectedModelPath;
+                if (!string.IsNullOrEmpty(savedPath) && System.IO.File.Exists(savedPath))
+                    await LoadVRM(savedPath, isAbsolutePath: true);
+                else
+                    await LoadVRM(vrmPath);
             }
         }
 
-        public async Task LoadVRM(string path)
+        public async Task LoadVRM(string path, bool isAbsolutePath = false)
         {
             if (_vrmInstance != null)
             {
@@ -46,7 +51,9 @@ namespace Annabeth.Avatar
 
             try
             {
-                string fullPath = System.IO.Path.Combine(Application.streamingAssetsPath, path);
+                string fullPath = isAbsolutePath
+                    ? path
+                    : System.IO.Path.Combine(Application.streamingAssetsPath, path);
                 Debug.Log($"[AvatarController] Loading VRM from: {fullPath}");
                 Debug.Log($"[AvatarController] File exists: {System.IO.File.Exists(fullPath)}");
 

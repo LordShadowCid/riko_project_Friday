@@ -3,6 +3,7 @@ using Annabeth.Core;
 using Annabeth.Avatar;
 using Annabeth.Dance;
 using Annabeth.Interaction;
+using Annabeth.UI;
 
 namespace Annabeth
 {
@@ -33,6 +34,9 @@ namespace Annabeth
 
         [Header("Interaction")]
         [SerializeField] private TouchReactionController touchReactionController;
+
+        [Header("UI")]
+        [SerializeField] private SpeechBubble speechBubble;
 
         [Header("State")]
         [SerializeField] private CompanionMode currentMode = CompanionMode.Idle;
@@ -130,6 +134,17 @@ namespace Annabeth
                 touchReactionController.Initialize(vrm);
             }
 
+            // Wire speech bubble to head bone
+            if (speechBubble == null)
+                speechBubble = FindFirstObjectByType<SpeechBubble>();
+            if (speechBubble != null)
+            {
+                var headBone = avatarController.GetComponentInChildren<Animator>()
+                    ?.GetBoneTransform(HumanBodyBones.Head);
+                if (headBone != null)
+                    speechBubble.SetHeadBone(headBone);
+            }
+
             // Apply user settings to all controllers now that VRM is ready
             if (SettingsManager.Instance != null)
                 SettingsManager.Instance.ApplyAllSettings();
@@ -141,6 +156,7 @@ namespace Annabeth
         {
             isSpeaking = true;
             lipSyncController?.StartSpeaking();
+            speechBubble?.ShowText(text);
             Debug.Log($"[CompanionManager] Speaking: {text}");
         }
 
@@ -148,6 +164,7 @@ namespace Annabeth
         {
             isSpeaking = false;
             lipSyncController?.StopSpeaking();
+            speechBubble?.StartDismissTimer();
             Debug.Log("[CompanionManager] Stopped speaking");
         }
 

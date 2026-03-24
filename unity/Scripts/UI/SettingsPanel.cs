@@ -1,56 +1,60 @@
 using UnityEngine;
 using UnityEngine.UI;
-using TMPro;
 
 namespace Annabeth.UI
 {
     /// <summary>
     /// Settings panel with sliders and toggles for all user preferences.
-    /// Pattern from Mate-Engine AvatarSettingsMenu.cs:
-    ///   1. Wire onValueChanged → write to SettingsData → SaveAll()
-    ///   2. LoadSettings() → read from SettingsData → SetValueWithoutNotify
-    ///   3. ResetToDefaults() → fresh SettingsData, reload UI
+    /// Builds its own scroll-view + controls at runtime via UIFactory — no Editor wiring needed.
     /// </summary>
     public class SettingsPanel : MonoBehaviour
     {
-        [Header("Display")]
-        [SerializeField] private Slider sliderFPS;
-        [SerializeField] private TextMeshProUGUI labelFPS;
-        [SerializeField] private Toggle toggleAlwaysOnTop;
-        [SerializeField] private Slider sliderAvatarSize;
-        [SerializeField] private TextMeshProUGUI labelAvatarSize;
+        // ── Runtime-created references ──────────────────────────
+        private RectTransform _panelRect;
 
-        [Header("Tracking")]
-        [SerializeField] private Toggle toggleMouseTracking;
-        [SerializeField] private Slider sliderEyeBlend;
-        [SerializeField] private TextMeshProUGUI labelEyeBlend;
-        [SerializeField] private Slider sliderHeadBlend;
-        [SerializeField] private TextMeshProUGUI labelHeadBlend;
+        // Display
+        private Slider _sliderFPS;
+        private Text _labelFPS;
+        private Toggle _toggleAlwaysOnTop;
+        private Slider _sliderAvatarSize;
+        private Text _labelAvatarSize;
 
-        [Header("Interaction")]
-        [SerializeField] private Toggle toggleParticles;
-        [SerializeField] private Toggle toggleTouchSounds;
-        [SerializeField] private Slider sliderSFXVolume;
-        [SerializeField] private TextMeshProUGUI labelSFXVolume;
+        // Tracking
+        private Toggle _toggleMouseTracking;
+        private Slider _sliderEyeBlend;
+        private Text _labelEyeBlend;
+        private Slider _sliderHeadBlend;
+        private Text _labelHeadBlend;
 
-        [Header("AI / Speech")]
-        [SerializeField] private Toggle toggleSpeechBubble;
+        // Interaction
+        private Toggle _toggleParticles;
+        private Toggle _toggleTouchSounds;
+        private Slider _sliderSFXVolume;
+        private Text _labelSFXVolume;
 
-        [Header("System")]
-        [SerializeField] private Toggle toggleSleepMode;
-        [SerializeField] private Slider sliderSleepTimer;
-        [SerializeField] private TextMeshProUGUI labelSleepTimer;
-        [SerializeField] private Toggle toggleAutoMemoryTrim;
-        [SerializeField] private Toggle toggleMinimizeToTray;
+        // AI
+        private Toggle _toggleSpeechBubble;
 
-        [Header("Actions")]
-        [SerializeField] private Button btnResetDefaults;
-        [SerializeField] private Button btnClose;
+        // System
+        private Toggle _toggleSleepMode;
+        private Slider _sliderSleepTimer;
+        private Text _labelSleepTimer;
+        private Toggle _toggleAutoMemoryTrim;
+        private Toggle _toggleMinimizeToTray;
 
-        [Header("References")]
-        [SerializeField] private RadialMenu radialMenu;
+        private Button _btnResetDefaults;
+        private Button _btnClose;
 
-        private bool _loading; // Guard to prevent save during LoadSettings()
+        private RadialMenu _radialMenu;
+        private bool _loading;
+
+        /// <summary>Called by RadialMenu after AddComponent.</summary>
+        public void SetRadialMenu(RadialMenu menu) => _radialMenu = menu;
+
+        private void Awake()
+        {
+            BuildUI();
+        }
 
         private void OnEnable()
         {
@@ -63,70 +67,125 @@ namespace Annabeth.UI
             UnwireListeners();
         }
 
+        // ── Build ───────────────────────────────────────────────
+
+        private void BuildUI()
+        {
+            var panelSize = new Vector2(420, 520);
+            _panelRect = UIFactory.CreatePanel(transform, "SettingsBg", panelSize);
+            _panelRect.anchorMin = new Vector2(0.5f, 0.5f);
+            _panelRect.anchorMax = new Vector2(0.5f, 0.5f);
+            _panelRect.anchoredPosition = Vector2.zero;
+
+            // Scroll view fills the panel
+            var (_, content) = UIFactory.CreateScrollView(_panelRect, panelSize - new Vector2(8, 60));
+            var svRt = content.parent.parent.GetComponent<RectTransform>();
+            svRt.anchorMin = new Vector2(0.5f, 0.5f);
+            svRt.anchorMax = new Vector2(0.5f, 0.5f);
+            svRt.anchoredPosition = new Vector2(0, 18);
+
+            var rowSize = new Vector2(380, 28);
+            var toggleSize = new Vector2(380, 26);
+
+            // ── Display ─────────────
+            UIFactory.CreateSectionHeader(content, "Display", rowSize);
+            (_sliderFPS, _labelFPS) = UIFactory.CreateSliderRow(content, "FPS", "FPS Limit", 15, 165, true, rowSize);
+            _toggleAlwaysOnTop = UIFactory.CreateToggle(content, "AlwaysOnTop", "Always On Top", toggleSize);
+            (_sliderAvatarSize, _labelAvatarSize) = UIFactory.CreateSliderRow(content, "AvatarSize", "Avatar Size", 0.5f, 2f, false, rowSize);
+
+            UIFactory.CreateSeparator(content, rowSize.x);
+
+            // ── Tracking ────────────
+            UIFactory.CreateSectionHeader(content, "Tracking", rowSize);
+            _toggleMouseTracking = UIFactory.CreateToggle(content, "MouseTracking", "Mouse Tracking", toggleSize);
+            (_sliderEyeBlend, _labelEyeBlend) = UIFactory.CreateSliderRow(content, "EyeBlend", "Eye Blend", 0f, 1f, false, rowSize);
+            (_sliderHeadBlend, _labelHeadBlend) = UIFactory.CreateSliderRow(content, "HeadBlend", "Head Blend", 0f, 1f, false, rowSize);
+
+            UIFactory.CreateSeparator(content, rowSize.x);
+
+            // ── Interaction ─────────
+            UIFactory.CreateSectionHeader(content, "Interaction", rowSize);
+            _toggleParticles = UIFactory.CreateToggle(content, "Particles", "Particles", toggleSize);
+            _toggleTouchSounds = UIFactory.CreateToggle(content, "TouchSounds", "Touch Sounds", toggleSize);
+            (_sliderSFXVolume, _labelSFXVolume) = UIFactory.CreateSliderRow(content, "SFXVolume", "SFX Volume", 0f, 1f, false, rowSize);
+
+            UIFactory.CreateSeparator(content, rowSize.x);
+
+            // ── AI / Speech ─────────
+            UIFactory.CreateSectionHeader(content, "AI / Speech", rowSize);
+            _toggleSpeechBubble = UIFactory.CreateToggle(content, "SpeechBubble", "Speech Bubble", toggleSize);
+
+            UIFactory.CreateSeparator(content, rowSize.x);
+
+            // ── System ──────────────
+            UIFactory.CreateSectionHeader(content, "System", rowSize);
+            _toggleSleepMode = UIFactory.CreateToggle(content, "SleepMode", "Sleep Mode", toggleSize);
+            (_sliderSleepTimer, _labelSleepTimer) = UIFactory.CreateSliderRow(content, "SleepTimer", "Sleep Timer", 30, 360, true, rowSize);
+            _toggleAutoMemoryTrim = UIFactory.CreateToggle(content, "AutoMemTrim", "Auto Memory Trim", toggleSize);
+            _toggleMinimizeToTray = UIFactory.CreateToggle(content, "MinToTray", "Minimize to Tray", toggleSize);
+
+            UIFactory.CreateSeparator(content, rowSize.x);
+
+            // ── Action Buttons ──────
+            var btnSize = new Vector2(180, 32);
+            _btnResetDefaults = UIFactory.CreateButton(content, "BtnReset", "Reset Defaults", btnSize);
+            _btnClose = UIFactory.CreateButton(content, "BtnClose", "Close", btnSize);
+        }
+
         // ── Wiring ──────────────────────────────────────────────
 
         private void WireListeners()
         {
-            // Display
-            sliderFPS?.onValueChanged.AddListener(OnFPSChanged);
-            toggleAlwaysOnTop?.onValueChanged.AddListener(OnAlwaysOnTopChanged);
-            sliderAvatarSize?.onValueChanged.AddListener(OnAvatarSizeChanged);
+            _sliderFPS?.onValueChanged.AddListener(OnFPSChanged);
+            _toggleAlwaysOnTop?.onValueChanged.AddListener(OnAlwaysOnTopChanged);
+            _sliderAvatarSize?.onValueChanged.AddListener(OnAvatarSizeChanged);
 
-            // Tracking
-            toggleMouseTracking?.onValueChanged.AddListener(OnMouseTrackingChanged);
-            sliderEyeBlend?.onValueChanged.AddListener(OnEyeBlendChanged);
-            sliderHeadBlend?.onValueChanged.AddListener(OnHeadBlendChanged);
+            _toggleMouseTracking?.onValueChanged.AddListener(OnMouseTrackingChanged);
+            _sliderEyeBlend?.onValueChanged.AddListener(OnEyeBlendChanged);
+            _sliderHeadBlend?.onValueChanged.AddListener(OnHeadBlendChanged);
 
-            // Interaction
-            toggleParticles?.onValueChanged.AddListener(OnParticlesChanged);
-            toggleTouchSounds?.onValueChanged.AddListener(OnTouchSoundsChanged);
-            sliderSFXVolume?.onValueChanged.AddListener(OnSFXVolumeChanged);
+            _toggleParticles?.onValueChanged.AddListener(OnParticlesChanged);
+            _toggleTouchSounds?.onValueChanged.AddListener(OnTouchSoundsChanged);
+            _sliderSFXVolume?.onValueChanged.AddListener(OnSFXVolumeChanged);
 
-            // AI
-            toggleSpeechBubble?.onValueChanged.AddListener(OnSpeechBubbleChanged);
+            _toggleSpeechBubble?.onValueChanged.AddListener(OnSpeechBubbleChanged);
 
-            // System
-            toggleSleepMode?.onValueChanged.AddListener(OnSleepModeChanged);
-            sliderSleepTimer?.onValueChanged.AddListener(OnSleepTimerChanged);
-            toggleAutoMemoryTrim?.onValueChanged.AddListener(OnAutoMemoryTrimChanged);
-            toggleMinimizeToTray?.onValueChanged.AddListener(OnMinimizeToTrayChanged);
+            _toggleSleepMode?.onValueChanged.AddListener(OnSleepModeChanged);
+            _sliderSleepTimer?.onValueChanged.AddListener(OnSleepTimerChanged);
+            _toggleAutoMemoryTrim?.onValueChanged.AddListener(OnAutoMemoryTrimChanged);
+            _toggleMinimizeToTray?.onValueChanged.AddListener(OnMinimizeToTrayChanged);
 
-            // Buttons
-            btnResetDefaults?.onClick.AddListener(OnResetDefaults);
-            btnClose?.onClick.AddListener(OnClose);
+            _btnResetDefaults?.onClick.AddListener(OnResetDefaults);
+            _btnClose?.onClick.AddListener(OnClose);
         }
 
         private void UnwireListeners()
         {
-            sliderFPS?.onValueChanged.RemoveListener(OnFPSChanged);
-            toggleAlwaysOnTop?.onValueChanged.RemoveListener(OnAlwaysOnTopChanged);
-            sliderAvatarSize?.onValueChanged.RemoveListener(OnAvatarSizeChanged);
+            _sliderFPS?.onValueChanged.RemoveListener(OnFPSChanged);
+            _toggleAlwaysOnTop?.onValueChanged.RemoveListener(OnAlwaysOnTopChanged);
+            _sliderAvatarSize?.onValueChanged.RemoveListener(OnAvatarSizeChanged);
 
-            toggleMouseTracking?.onValueChanged.RemoveListener(OnMouseTrackingChanged);
-            sliderEyeBlend?.onValueChanged.RemoveListener(OnEyeBlendChanged);
-            sliderHeadBlend?.onValueChanged.RemoveListener(OnHeadBlendChanged);
+            _toggleMouseTracking?.onValueChanged.RemoveListener(OnMouseTrackingChanged);
+            _sliderEyeBlend?.onValueChanged.RemoveListener(OnEyeBlendChanged);
+            _sliderHeadBlend?.onValueChanged.RemoveListener(OnHeadBlendChanged);
 
-            toggleParticles?.onValueChanged.RemoveListener(OnParticlesChanged);
-            toggleTouchSounds?.onValueChanged.RemoveListener(OnTouchSoundsChanged);
-            sliderSFXVolume?.onValueChanged.RemoveListener(OnSFXVolumeChanged);
+            _toggleParticles?.onValueChanged.RemoveListener(OnParticlesChanged);
+            _toggleTouchSounds?.onValueChanged.RemoveListener(OnTouchSoundsChanged);
+            _sliderSFXVolume?.onValueChanged.RemoveListener(OnSFXVolumeChanged);
 
-            toggleSpeechBubble?.onValueChanged.RemoveListener(OnSpeechBubbleChanged);
+            _toggleSpeechBubble?.onValueChanged.RemoveListener(OnSpeechBubbleChanged);
 
-            toggleSleepMode?.onValueChanged.RemoveListener(OnSleepModeChanged);
-            sliderSleepTimer?.onValueChanged.RemoveListener(OnSleepTimerChanged);
-            toggleAutoMemoryTrim?.onValueChanged.RemoveListener(OnAutoMemoryTrimChanged);
-            toggleMinimizeToTray?.onValueChanged.RemoveListener(OnMinimizeToTrayChanged);
+            _toggleSleepMode?.onValueChanged.RemoveListener(OnSleepModeChanged);
+            _sliderSleepTimer?.onValueChanged.RemoveListener(OnSleepTimerChanged);
+            _toggleAutoMemoryTrim?.onValueChanged.RemoveListener(OnAutoMemoryTrimChanged);
+            _toggleMinimizeToTray?.onValueChanged.RemoveListener(OnMinimizeToTrayChanged);
 
-            btnResetDefaults?.onClick.RemoveListener(OnResetDefaults);
-            btnClose?.onClick.RemoveListener(OnClose);
+            _btnResetDefaults?.onClick.RemoveListener(OnResetDefaults);
+            _btnClose?.onClick.RemoveListener(OnClose);
         }
 
         // ── Load / Apply ────────────────────────────────────────
 
-        /// <summary>
-        /// Read from SettingsData and push values into UI controls
-        /// using SetValueWithoutNotify to avoid triggering save loops.
-        /// </summary>
         private void LoadSettings()
         {
             var sm = Core.SettingsManager.Instance;
@@ -136,81 +195,34 @@ namespace Annabeth.UI
             _loading = true;
 
             // Display
-            if (sliderFPS != null)
-            {
-                sliderFPS.minValue = 15;
-                sliderFPS.maxValue = 165;
-                sliderFPS.wholeNumbers = true;
-                sliderFPS.SetValueWithoutNotify(d.fpsLimit);
-            }
-            UpdateLabel(labelFPS, $"{d.fpsLimit} FPS");
-
-            if (toggleAlwaysOnTop != null)
-                toggleAlwaysOnTop.SetIsOnWithoutNotify(d.alwaysOnTop);
-
-            if (sliderAvatarSize != null)
-            {
-                sliderAvatarSize.minValue = 0.5f;
-                sliderAvatarSize.maxValue = 2f;
-                sliderAvatarSize.SetValueWithoutNotify(d.avatarSize);
-            }
-            UpdateLabel(labelAvatarSize, $"{d.avatarSize:F1}x");
+            _sliderFPS?.SetValueWithoutNotify(d.fpsLimit);
+            UpdateLabel(_labelFPS, $"{d.fpsLimit} FPS");
+            _toggleAlwaysOnTop?.SetIsOnWithoutNotify(d.alwaysOnTop);
+            _sliderAvatarSize?.SetValueWithoutNotify(d.avatarSize);
+            UpdateLabel(_labelAvatarSize, $"{d.avatarSize:F1}x");
 
             // Tracking
-            if (toggleMouseTracking != null)
-                toggleMouseTracking.SetIsOnWithoutNotify(d.enableMouseTracking);
-
-            if (sliderEyeBlend != null)
-            {
-                sliderEyeBlend.minValue = 0f;
-                sliderEyeBlend.maxValue = 1f;
-                sliderEyeBlend.SetValueWithoutNotify(d.eyeBlend);
-            }
-            UpdateLabel(labelEyeBlend, $"{d.eyeBlend:P0}");
-
-            if (sliderHeadBlend != null)
-            {
-                sliderHeadBlend.minValue = 0f;
-                sliderHeadBlend.maxValue = 1f;
-                sliderHeadBlend.SetValueWithoutNotify(d.headBlend);
-            }
-            UpdateLabel(labelHeadBlend, $"{d.headBlend:P0}");
+            _toggleMouseTracking?.SetIsOnWithoutNotify(d.enableMouseTracking);
+            _sliderEyeBlend?.SetValueWithoutNotify(d.eyeBlend);
+            UpdateLabel(_labelEyeBlend, $"{d.eyeBlend:P0}");
+            _sliderHeadBlend?.SetValueWithoutNotify(d.headBlend);
+            UpdateLabel(_labelHeadBlend, $"{d.headBlend:P0}");
 
             // Interaction
-            if (toggleParticles != null)
-                toggleParticles.SetIsOnWithoutNotify(d.enableParticles);
-            if (toggleTouchSounds != null)
-                toggleTouchSounds.SetIsOnWithoutNotify(d.enableTouchSounds);
-
-            if (sliderSFXVolume != null)
-            {
-                sliderSFXVolume.minValue = 0f;
-                sliderSFXVolume.maxValue = 1f;
-                sliderSFXVolume.SetValueWithoutNotify(d.sfxVolume);
-            }
-            UpdateLabel(labelSFXVolume, $"{d.sfxVolume:P0}");
+            _toggleParticles?.SetIsOnWithoutNotify(d.enableParticles);
+            _toggleTouchSounds?.SetIsOnWithoutNotify(d.enableTouchSounds);
+            _sliderSFXVolume?.SetValueWithoutNotify(d.sfxVolume);
+            UpdateLabel(_labelSFXVolume, $"{d.sfxVolume:P0}");
 
             // AI
-            if (toggleSpeechBubble != null)
-                toggleSpeechBubble.SetIsOnWithoutNotify(d.enableSpeechBubble);
+            _toggleSpeechBubble?.SetIsOnWithoutNotify(d.enableSpeechBubble);
 
             // System
-            if (toggleSleepMode != null)
-                toggleSleepMode.SetIsOnWithoutNotify(d.enableSleepMode);
-
-            if (sliderSleepTimer != null)
-            {
-                sliderSleepTimer.minValue = 30f;
-                sliderSleepTimer.maxValue = 360f;
-                sliderSleepTimer.wholeNumbers = true;
-                sliderSleepTimer.SetValueWithoutNotify(d.sleepTimerSeconds);
-            }
-            UpdateLabel(labelSleepTimer, $"{d.sleepTimerSeconds:F0}s");
-
-            if (toggleAutoMemoryTrim != null)
-                toggleAutoMemoryTrim.SetIsOnWithoutNotify(d.enableAutoMemoryTrim);
-            if (toggleMinimizeToTray != null)
-                toggleMinimizeToTray.SetIsOnWithoutNotify(d.minimizeToTray);
+            _toggleSleepMode?.SetIsOnWithoutNotify(d.enableSleepMode);
+            _sliderSleepTimer?.SetValueWithoutNotify(d.sleepTimerSeconds);
+            UpdateLabel(_labelSleepTimer, $"{d.sleepTimerSeconds:F0}s");
+            _toggleAutoMemoryTrim?.SetIsOnWithoutNotify(d.enableAutoMemoryTrim);
+            _toggleMinimizeToTray?.SetIsOnWithoutNotify(d.minimizeToTray);
 
             _loading = false;
         }
@@ -222,7 +234,7 @@ namespace Annabeth.UI
             if (_loading) return;
             int fps = Mathf.RoundToInt(val);
             Data.fpsLimit = fps;
-            UpdateLabel(labelFPS, $"{fps} FPS");
+            UpdateLabel(_labelFPS, $"{fps} FPS");
             SaveAndApply();
         }
 
@@ -237,7 +249,7 @@ namespace Annabeth.UI
         {
             if (_loading) return;
             Data.avatarSize = val;
-            UpdateLabel(labelAvatarSize, $"{val:F1}x");
+            UpdateLabel(_labelAvatarSize, $"{val:F1}x");
             SaveAndApply();
         }
 
@@ -252,7 +264,7 @@ namespace Annabeth.UI
         {
             if (_loading) return;
             Data.eyeBlend = val;
-            UpdateLabel(labelEyeBlend, $"{val:P0}");
+            UpdateLabel(_labelEyeBlend, $"{val:P0}");
             SaveAndApply();
         }
 
@@ -260,7 +272,7 @@ namespace Annabeth.UI
         {
             if (_loading) return;
             Data.headBlend = val;
-            UpdateLabel(labelHeadBlend, $"{val:P0}");
+            UpdateLabel(_labelHeadBlend, $"{val:P0}");
             SaveAndApply();
         }
 
@@ -282,7 +294,7 @@ namespace Annabeth.UI
         {
             if (_loading) return;
             Data.sfxVolume = val;
-            UpdateLabel(labelSFXVolume, $"{val:P0}");
+            UpdateLabel(_labelSFXVolume, $"{val:P0}");
             SaveAndApply();
         }
 
@@ -304,7 +316,7 @@ namespace Annabeth.UI
         {
             if (_loading) return;
             Data.sleepTimerSeconds = val;
-            UpdateLabel(labelSleepTimer, $"{val:F0}s");
+            UpdateLabel(_labelSleepTimer, $"{val:F0}s");
             SaveAndApply();
         }
 
@@ -332,8 +344,8 @@ namespace Annabeth.UI
 
         private void OnClose()
         {
-            if (radialMenu != null)
-                radialMenu.CloseSettings();
+            if (_radialMenu != null)
+                _radialMenu.CloseSettings();
             else
                 gameObject.SetActive(false);
         }
@@ -350,7 +362,7 @@ namespace Annabeth.UI
             sm.ApplyAllSettings();
         }
 
-        private static void UpdateLabel(TextMeshProUGUI label, string text)
+        private static void UpdateLabel(Text label, string text)
         {
             if (label != null)
                 label.text = text;
