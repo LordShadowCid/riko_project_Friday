@@ -66,6 +66,11 @@ namespace Annabeth.Core
         [DllImport("dwmapi.dll")] static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref MARGINS pMarInset);
 #endif
 
+        /// <summary>Fired when the user starts dragging the window.</summary>
+        public event Action OnDragStart;
+        /// <summary>Fired when the user stops dragging the window.</summary>
+        public event Action OnDragEnd;
+
         [Header("Window Settings")]
         [SerializeField] private bool transparent = true;
         [SerializeField] private bool alwaysOnTop = true;
@@ -242,6 +247,7 @@ namespace Annabeth.Core
                 GetCursorPos(out _dragStartCursor);
                 GetWindowRect(_hwnd, out _dragStartRect);
                 _dragging = true;
+                OnDragStart?.Invoke();
             }
 
             if (_dragging && UnityEngine.Input.GetMouseButton(0))
@@ -254,9 +260,10 @@ namespace Annabeth.Core
                 MoveWindow(_hwnd, _dragStartRect.Left + dx, _dragStartRect.Top + dy, w, h, true);
             }
 
-            if (UnityEngine.Input.GetMouseButtonUp(0))
+            if (UnityEngine.Input.GetMouseButtonUp(0) && _dragging)
             {
                 _dragging = false;
+                OnDragEnd?.Invoke();
             }
         }
 #endif

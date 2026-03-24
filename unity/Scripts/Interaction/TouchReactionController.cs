@@ -12,6 +12,9 @@ namespace Annabeth.Interaction
     /// </summary>
     public class TouchReactionController : MonoBehaviour
     {
+        /// <summary>Fired on touch reaction with (hitWorldPos, isHeadZone).</summary>
+        public event System.Action<Vector3, bool> OnTouchReaction;
+
         [Header("Settings")]
         [SerializeField] private float reactionDuration = 1.5f;
         [SerializeField] private float cooldown = 0.8f;
@@ -143,6 +146,8 @@ namespace Annabeth.Interaction
             _reactionTimer = reactionDuration;
             _reactionWeight = 0f;
             _cooldownTimer = cooldown;
+
+            OnTouchReaction?.Invoke(hitPoint, isHead);
 
             string zone = isHead ? "head" : "body";
             Debug.Log($"[TouchReaction] Touched {zone} -> {_activeReaction}");

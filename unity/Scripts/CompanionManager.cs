@@ -34,9 +34,14 @@ namespace Annabeth
 
         [Header("Interaction")]
         [SerializeField] private TouchReactionController touchReactionController;
+        [SerializeField] private TouchSoundHandler touchSoundHandler;
+        [SerializeField] private ParticleEffectHandler particleEffectHandler;
 
         [Header("UI")]
         [SerializeField] private SpeechBubble speechBubble;
+
+        [Header("Phase 5: Drag + Effects")]
+        [SerializeField] private DragAnimationController dragAnimController;
 
         [Header("State")]
         [SerializeField] private CompanionMode currentMode = CompanionMode.Idle;
@@ -77,6 +82,14 @@ namespace Annabeth
             {
                 avatarController.OnVrmLoaded += OnVrmLoaded;
             }
+
+            // Wire Phase 5 drag events
+            var windowCtrl = FindFirstObjectByType<TransparentWindowController>();
+            if (windowCtrl != null)
+            {
+                windowCtrl.OnDragStart += HandleDragStart;
+                windowCtrl.OnDragEnd += HandleDragEnd;
+            }
         }
 
         private void OnDestroy()
@@ -95,6 +108,13 @@ namespace Annabeth
             if (avatarController != null)
             {
                 avatarController.OnVrmLoaded -= OnVrmLoaded;
+            }
+
+            var windowCtrl = FindFirstObjectByType<TransparentWindowController>();
+            if (windowCtrl != null)
+            {
+                windowCtrl.OnDragStart -= HandleDragStart;
+                windowCtrl.OnDragEnd -= HandleDragEnd;
             }
         }
 
@@ -132,7 +152,20 @@ namespace Annabeth
             if (touchReactionController != null)
             {
                 touchReactionController.Initialize(vrm);
+                touchReactionController.OnTouchReaction += HandleTouchReaction;
             }
+
+            // Initialize Phase 5 handlers
+            if (touchSoundHandler == null)
+                touchSoundHandler = FindFirstObjectByType<TouchSoundHandler>();
+            if (particleEffectHandler == null)
+                particleEffectHandler = FindFirstObjectByType<ParticleEffectHandler>();
+
+            // Initialize drag animation (Phase 5)
+            if (dragAnimController == null)
+                dragAnimController = FindFirstObjectByType<DragAnimationController>();
+            if (dragAnimController != null)
+                dragAnimController.Initialize(vrm);
 
             // Wire speech bubble to head bone
             if (speechBubble == null)
@@ -172,6 +205,24 @@ namespace Annabeth
         {
             emotionController?.SetEmotion(emotion);
             Debug.Log($"[CompanionManager] Emotion: {emotion}");
+        }
+
+        // ── Phase 5: Drag & Touch Handlers ──────────────────────────
+
+        private void HandleDragStart()
+        {
+            touchSoundHandler?.PlayDragStart();
+        }
+
+        private void HandleDragEnd()
+        {
+            touchSoundHandler?.PlayDragEnd();
+        }
+
+        private void HandleTouchReaction(Vector3 hitPoint, bool isHead)
+        {
+            touchSoundHandler?.PlayTouchSound();
+            particleEffectHandler?.PlayAtPosition(hitPoint, isHead);
         }
 
         private void HandleModeChange(CompanionMode mode)
