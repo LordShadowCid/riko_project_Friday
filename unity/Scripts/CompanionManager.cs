@@ -43,6 +43,9 @@ namespace Annabeth
         [Header("Phase 5: Drag + Effects")]
         [SerializeField] private DragAnimationController dragAnimController;
 
+        [Header("Phase 6: System")]
+        [SerializeField] private SleepController sleepController;
+
         [Header("State")]
         [SerializeField] private CompanionMode currentMode = CompanionMode.Idle;
         [SerializeField] private DanceStyle currentDanceStyle = DanceStyle.None;
@@ -90,6 +93,10 @@ namespace Annabeth
                 windowCtrl.OnDragStart += HandleDragStart;
                 windowCtrl.OnDragEnd += HandleDragEnd;
             }
+
+            // Cache Phase 6 sleep controller
+            if (sleepController == null)
+                sleepController = FindFirstObjectByType<SleepController>();
         }
 
         private void OnDestroy()
@@ -298,6 +305,7 @@ namespace Annabeth
         private void HandleAudioAnalysis(float bass, float mid, float high, bool isBeat)
         {
             if (currentMode != CompanionMode.Dance) return;
+            if (sleepController != null && sleepController.IsSleeping) return;
 
             if (currentDanceStyle == DanceStyle.Procedural)
             {

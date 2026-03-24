@@ -41,6 +41,7 @@ namespace Annabeth.UI
         private Text _labelSleepTimer;
         private Toggle _toggleAutoMemoryTrim;
         private Toggle _toggleMinimizeToTray;
+        private Toggle _toggleStartWithWindows;
 
         private Button _btnResetDefaults;
         private Button _btnClose;
@@ -123,6 +124,7 @@ namespace Annabeth.UI
             (_sliderSleepTimer, _labelSleepTimer) = UIFactory.CreateSliderRow(content, "SleepTimer", "Sleep Timer", 30, 360, true, rowSize);
             _toggleAutoMemoryTrim = UIFactory.CreateToggle(content, "AutoMemTrim", "Auto Memory Trim", toggleSize);
             _toggleMinimizeToTray = UIFactory.CreateToggle(content, "MinToTray", "Minimize to Tray", toggleSize);
+            _toggleStartWithWindows = UIFactory.CreateToggle(content, "StartWin", "Start with Windows", toggleSize);
 
             UIFactory.CreateSeparator(content, rowSize.x);
 
@@ -154,6 +156,7 @@ namespace Annabeth.UI
             _sliderSleepTimer?.onValueChanged.AddListener(OnSleepTimerChanged);
             _toggleAutoMemoryTrim?.onValueChanged.AddListener(OnAutoMemoryTrimChanged);
             _toggleMinimizeToTray?.onValueChanged.AddListener(OnMinimizeToTrayChanged);
+            _toggleStartWithWindows?.onValueChanged.AddListener(OnStartWithWindowsChanged);
 
             _btnResetDefaults?.onClick.AddListener(OnResetDefaults);
             _btnClose?.onClick.AddListener(OnClose);
@@ -179,6 +182,7 @@ namespace Annabeth.UI
             _sliderSleepTimer?.onValueChanged.RemoveListener(OnSleepTimerChanged);
             _toggleAutoMemoryTrim?.onValueChanged.RemoveListener(OnAutoMemoryTrimChanged);
             _toggleMinimizeToTray?.onValueChanged.RemoveListener(OnMinimizeToTrayChanged);
+            _toggleStartWithWindows?.onValueChanged.RemoveListener(OnStartWithWindowsChanged);
 
             _btnResetDefaults?.onClick.RemoveListener(OnResetDefaults);
             _btnClose?.onClick.RemoveListener(OnClose);
@@ -223,6 +227,7 @@ namespace Annabeth.UI
             UpdateLabel(_labelSleepTimer, $"{d.sleepTimerSeconds:F0}s");
             _toggleAutoMemoryTrim?.SetIsOnWithoutNotify(d.enableAutoMemoryTrim);
             _toggleMinimizeToTray?.SetIsOnWithoutNotify(d.minimizeToTray);
+            _toggleStartWithWindows?.SetIsOnWithoutNotify(d.startWithWindows);
 
             _loading = false;
         }
@@ -331,6 +336,13 @@ namespace Annabeth.UI
         {
             if (_loading) return;
             Data.minimizeToTray = val;
+            SaveAndApply();
+        }
+
+        private void OnStartWithWindowsChanged(bool val)
+        {
+            if (_loading) return;
+            Data.startWithWindows = val;
             SaveAndApply();
         }
 

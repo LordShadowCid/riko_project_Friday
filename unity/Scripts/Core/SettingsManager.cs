@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Runtime.InteropServices;
 using UnityEngine;
 
 namespace Annabeth.Core
@@ -84,7 +85,64 @@ namespace Annabeth.Core
             if (win != null)
                 win.SetTopmost(data.alwaysOnTop);
 
+            // Sleep controller
+            var sleep = FindFirstObjectByType<SleepController>();
+            sleep?.ApplySettings();
+
+            // Start with Windows
+            ApplyStartWithWindows();
+
             Debug.Log("[SettingsManager] Applied all settings.");
+        }
+
+        // ── Start with Windows ────────────────────────────────────
+
+#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
+        static extern int RegOpenKeyExW(IntPtr hKey, string subKey, uint options, uint sam, out IntPtr result);
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
+        static extern int RegSetValueExW(IntPtr hKey, string name, uint reserved, uint type, byte[] data, uint cbData);
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
+        static extern int RegDeleteValueW(IntPtr hKey, string name);
+        [DllImport("advapi32.dll")]
+        static extern int RegCloseKey(IntPtr hKey);
+
+        static readonly IntPtr HKCU = new IntPtr(unchecked((int)0x80000001));
+#endif
+
+        private void ApplyStartWithWindows()
+        {
+#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+            try
+            {
+                if (RegOpenKeyExW(HKCU, @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+                    0, 0x0002 /* KEY_SET_VALUE */, out IntPtr hKey) == 0)
+                {
+                    try
+                    {
+                        if (data.startWithWindows)
+                        {
+                            string exe = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName ?? "";
+                            if (exe.Length > 0)
+                            {
+                                string val = $"\"{ exe}\"";
+                                byte[] bytes = System.Text.Encoding.Unicode.GetBytes(val + "\0");
+                                RegSetValueExW(hKey, "Annabeth", 0, 1 /* REG_SZ */, bytes, (uint)bytes.Length);
+                            }
+                        }
+                        else
+                        {
+                            RegDeleteValueW(hKey, "Annabeth");
+                        }
+                    }
+                    finally { RegCloseKey(hKey); }
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[SettingsManager] Startup registry: {e.Message}");
+            }
+#endif
         }
 
         // ── Persistence ─────────────────────────────────────────
@@ -178,5 +236,6 @@ namespace Annabeth.Core
         public float sleepTimerSeconds = 120f;
         public bool enableAutoMemoryTrim = false;
         public bool minimizeToTray = true;
+        public bool startWithWindows = false;
     }
 }
