@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 using UnityEngine.UI;
+using UniVRM10;
 using Annabeth.UI;
 
 namespace Annabeth.Avatar
@@ -14,9 +15,6 @@ namespace Annabeth.Avatar
     /// </summary>
     public class VrmModelLibrary : MonoBehaviour
     {
-        private static bool _isLibraryOpen;
-        public static bool IsLibraryOpen => _isLibraryOpen;
-
         private RectTransform _panelRect;
         private RectTransform _listContent;
         private Button _btnAddNew;
@@ -25,6 +23,10 @@ namespace Annabeth.Avatar
         private AvatarController _avatarController;
         private List<LibraryEntry> _entries = new List<LibraryEntry>();
         private readonly List<GameObject> _entryRows = new List<GameObject>();
+        private bool _isLoading;
+
+        /// <summary>Called when the Close button is pressed — RadialMenu hooks this to sync state.</summary>
+        public event System.Action OnCloseRequested;
 
         private string LibraryPath =>
             Path.Combine(Application.persistentDataPath, "avatars.json");
@@ -39,13 +41,7 @@ namespace Annabeth.Avatar
 
         private void OnEnable()
         {
-            _isLibraryOpen = true;
             RefreshList();
-        }
-
-        private void OnDisable()
-        {
-            _isLibraryOpen = false;
         }
 
         // ── UI Construction ─────────────────────────────────────
@@ -190,7 +186,9 @@ namespace Annabeth.Avatar
             nameRt.offsetMin = new Vector2(10, 2);
             nameRt.offsetMax = new Vector2(0, -2);
             var nameTxt = nameGo.AddComponent<Text>();
-            nameTxt.text = entry.displayName;
+            nameTxt.text = !string.IsNullOrEmpty(entry.author) && entry.author != "Unknown"
+                ? $"{entry.displayName}  ({entry.author})"
+                : entry.displayName;
             nameTxt.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")
                 ?? Font.CreateDynamicFontFromOSFont("Segoe UI", 14);
             nameTxt.fontSize = 14;
@@ -250,6 +248,7 @@ namespace Annabeth.Avatar
 
         private async void OnLoadEntry(int index)
         {
+            if (_isLoading) return;
             if (index < 0 || index >= _entries.Count) return;
             var entry = _entries[index];
 
@@ -262,29 +261,44 @@ namespace Annabeth.Avatar
                 return;
             }
 
-            if (entry.isDefault)
+            _isLoading = true;
+            try
             {
-                // Load the bundled default model (relative path)
-                await _avatarController.LoadVRM(entry.filePath);
-                if (Core.SettingsManager.Instance != null)
+                if (entry.isDefault)
                 {
-                    Core.SettingsManager.Instance.data.selectedModelPath = "";
-                    Core.SettingsManager.Instance.SaveAll();
+                    await _avatarController.LoadVRM(entry.filePath);
+                    if (Core.SettingsManager.Instance != null)
+                    {
+                        Core.SettingsManager.Instance.data.selectedModelPath = "";
+                        Core.SettingsManager.Instance.SaveAll();
+                    }
                 }
-            }
-            else
-            {
-                // Load external model (absolute path)
-                await _avatarController.LoadVRM(entry.filePath, isAbsolutePath: true);
-                if (Core.SettingsManager.Instance != null)
+                else
                 {
-                    Core.SettingsManager.Instance.data.selectedModelPath = entry.filePath;
-                    Core.SettingsManager.Instance.SaveAll();
+                    if (!File.Exists(entry.filePath))
+                    {
+                        Debug.LogWarning($"[VrmModelLibrary] File not found: {entry.filePath}");
+                        return;
+                    }
+                    await _avatarController.LoadVRM(entry.filePath, isAbsolutePath: true);
+                    if (Core.SettingsManager.Instance != null)
+                    {
+                        Core.SettingsManager.Instance.data.selectedModelPath = entry.filePath;
+                        Core.SettingsManager.Instance.SaveAll();
+                    }
                 }
-            }
 
-            Debug.Log($"[VrmModelLibrary] Loaded: {entry.displayName}");
-            RefreshList(); // Update highlight
+                Debug.Log($"[VrmModelLibrary] Loaded: {entry.displayName}");
+                RefreshList();
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[VrmModelLibrary] Load failed: {e.Message}");
+            }
+            finally
+            {
+                _isLoading = false;
+            }
         }
 
         private void OnRemoveEntry(int index)
@@ -298,10 +312,18 @@ namespace Annabeth.Avatar
             RefreshList();
         }
 
-        private void OnAddNew()
+        private async void OnAddNew()
         {
+            if (_isLoading) return;
+
             string path = VrmFilePicker.OpenVrmFileDialog();
             if (string.IsNullOrEmpty(path)) return;
+
+            if (!File.Exists(path))
+            {
+                Debug.LogWarning($"[VrmModelLibrary] File not found: {path}");
+                return;
+            }
 
             // Check for duplicates
             foreach (var e in _entries)
@@ -313,27 +335,61 @@ namespace Annabeth.Avatar
                 }
             }
 
-            // Extract display name from filename
+            // Extract display name from filename initially
             string fileName = Path.GetFileNameWithoutExtension(path);
+            string displayName = fileName;
+            string author = "Unknown";
+
+            // Try to extract VRM metadata
+            _isLoading = true;
+            try
+            {
+                var vrm10 = await UniVRM10.Vrm10.LoadPathAsync(path,
+                    canLoadVrm0X: true, showMeshes: false);
+
+                if (vrm10 != null)
+                {
+                    var meta = vrm10.Vrm?.Meta;
+                    if (meta != null)
+                    {
+                        if (!string.IsNullOrEmpty(meta.Name))
+                            displayName = meta.Name;
+                        if (meta.Authors != null && meta.Authors.Count > 0
+                            && !string.IsNullOrEmpty(meta.Authors[0]))
+                            author = meta.Authors[0];
+                    }
+                    Destroy(vrm10.gameObject);
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[VrmModelLibrary] Could not read VRM metadata: {e.Message}");
+            }
+            finally
+            {
+                _isLoading = false;
+            }
+
             var entry = new LibraryEntry
             {
-                displayName = fileName,
+                displayName = displayName,
                 filePath = path,
                 isDefault = false,
                 isRelativeToStreaming = false,
-                dateAdded = DateTime.Now.ToString("yyyy-MM-dd HH:mm")
+                dateAdded = DateTime.Now.ToString("yyyy-MM-dd HH:mm"),
+                author = author
             };
 
             _entries.Add(entry);
             SaveLibrary();
             RefreshList();
 
-            Debug.Log($"[VrmModelLibrary] Added: {fileName}");
+            Debug.Log($"[VrmModelLibrary] Added: {displayName} by {author}");
         }
 
         private void OnClose()
         {
-            gameObject.SetActive(false);
+            OnCloseRequested?.Invoke();
         }
 
         private void OnDestroy()
@@ -348,6 +404,7 @@ namespace Annabeth.Avatar
         public class LibraryEntry
         {
             public string displayName;
+            public string author;
             public string filePath;
             public bool isDefault;
             public bool isRelativeToStreaming;

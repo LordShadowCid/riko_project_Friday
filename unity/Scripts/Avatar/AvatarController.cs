@@ -47,6 +47,8 @@ namespace Annabeth.Avatar
                 _vrmInstance = null;
                 _expression = null;
                 _isLoaded = false;
+                // Release resources from previous model (VRM assets can be large)
+                Resources.UnloadUnusedAssets();
             }
 
             try
@@ -55,7 +57,12 @@ namespace Annabeth.Avatar
                     ? path
                     : System.IO.Path.Combine(Application.streamingAssetsPath, path);
                 Debug.Log($"[AvatarController] Loading VRM from: {fullPath}");
-                Debug.Log($"[AvatarController] File exists: {System.IO.File.Exists(fullPath)}");
+
+                if (!System.IO.File.Exists(fullPath))
+                {
+                    Debug.LogError($"[AvatarController] File not found: {fullPath}");
+                    return;
+                }
 
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 

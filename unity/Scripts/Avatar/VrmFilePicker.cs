@@ -16,6 +16,9 @@ namespace Annabeth.Avatar
         [DllImport("comdlg32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         private static extern bool GetOpenFileName(ref OpenFileName ofn);
 
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetActiveWindow();
+
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         private struct OpenFileName
         {
@@ -69,7 +72,7 @@ namespace Annabeth.Avatar
 
                 var ofn = new OpenFileName();
                 ofn.lStructSize = Marshal.SizeOf(ofn);
-                ofn.hwndOwner = IntPtr.Zero;
+                ofn.hwndOwner = GetActiveWindow();
                 ofn.lpstrFilter = "VRM Models (*.vrm)\0*.vrm\0All Files (*.*)\0*.*\0\0";
                 ofn.lpstrFile = buffer;
                 ofn.nMaxFile = MAX_PATH;

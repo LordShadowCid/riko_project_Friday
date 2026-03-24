@@ -48,6 +48,9 @@ namespace Annabeth.UI
             _btnClearHistory?.onClick.RemoveListener(OnClearHistoryClick);
             _btnQuit?.onClick.RemoveListener(OnQuitClick);
 
+            if (_modelLibrary != null)
+                _modelLibrary.OnCloseRequested -= CloseLibrary;
+
             if (_canvas != null)
                 Destroy(_canvas.gameObject);
         }
@@ -94,6 +97,7 @@ namespace Annabeth.UI
             _libraryRoot = new GameObject("LibraryRoot");
             _libraryRoot.transform.SetParent(_canvas.transform, false);
             _modelLibrary = _libraryRoot.AddComponent<Avatar.VrmModelLibrary>();
+            _modelLibrary.OnCloseRequested += CloseLibrary;
             _libraryRoot.SetActive(false);
         }
 
@@ -120,7 +124,7 @@ namespace Annabeth.UI
             }
 
             // Escape closes any open panel
-            if (kb != null && kb.escapeKey.wasPressedThisFrame && (IsMenuOpen || _isSettingsOpen))
+            if (kb != null && kb.escapeKey.wasPressedThisFrame && (IsMenuOpen || _isSettingsOpen || _isLibraryOpen))
             {
                 CloseAll();
                 return;
