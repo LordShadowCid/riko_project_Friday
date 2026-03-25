@@ -46,6 +46,19 @@ namespace Annabeth
         [Header("Phase 6: System")]
         [SerializeField] private SleepController sleepController;
 
+        [Header("Sprint 3: Walk + Drag Pose + Pet")]
+        [SerializeField] private WalkAnimationController walkAnimController;
+        [SerializeField] private DragPoseController dragPoseController;
+        [SerializeField] private PetDetectionController petDetectionController;
+
+        [Header("Sprint 4: Desktop Integration")]
+        [SerializeField] private OccluderQuadManager occluderQuadManager;
+        [SerializeField] private DesktopAmbientProbe ambientProbe;
+
+        [Header("Sprint 5: Dance Expansion + Alarms")]
+        [SerializeField] private AlarmTimerManager alarmTimerManager;
+        [SerializeField] private CustomDanceLoader customDanceLoader;
+
         [Header("Phase 8: Desktop Interaction")]
         [SerializeField] private DesktopLocomotionController locomotionController;
         [SerializeField] private WindowSnapper windowSnapper;
@@ -58,6 +71,9 @@ namespace Annabeth
 
         // Track whether VRMA animation is audio-paused (no music playing)
         private bool _vrmaAudioPaused;
+
+        // Feature #12: Random message timer
+        private float _randomMsgTimer;
 
         public CompanionMode CurrentMode => currentMode;
         public bool IsSpeaking => isSpeaking;
@@ -96,6 +112,8 @@ namespace Annabeth
             {
                 windowCtrl.OnDragStart += HandleDragStart;
                 windowCtrl.OnDragEnd += HandleDragEnd;
+                // Feature #13: Wire file drop
+                windowCtrl.OnFileDropped += HandleFileDropped;
             }
 
             // Cache Phase 6 sleep controller
@@ -121,6 +139,31 @@ namespace Annabeth
             {
                 locomotionController.OnWalkStateChanged += HandleWalkStateChanged;
             }
+
+            // Feature #6: Wire sleep events
+            if (sleepController != null)
+            {
+                sleepController.OnSleepStart += HandleSleepStart;
+                sleepController.OnWakeUp += HandleWakeUp;
+            }
+
+            // Feature #8: Wire peek events
+            if (locomotionController != null)
+            {
+                locomotionController.OnPeekStateChanged += HandlePeekStateChanged;
+            }
+
+            // Feature #11: Wire pet detection
+            if (petDetectionController == null)
+                petDetectionController = FindFirstObjectByType<PetDetectionController>();
+            if (petDetectionController != null)
+                petDetectionController.OnPetDetected += HandlePetDetected;
+
+            // Feature #15: Wire alarm timer
+            if (alarmTimerManager == null)
+                alarmTimerManager = FindFirstObjectByType<AlarmTimerManager>();
+            if (alarmTimerManager != null)
+                alarmTimerManager.OnTimerFired += HandleTimerFired;
         }
 
         private void OnDestroy()
@@ -146,6 +189,7 @@ namespace Annabeth
             {
                 windowCtrl.OnDragStart -= HandleDragStart;
                 windowCtrl.OnDragEnd -= HandleDragEnd;
+                windowCtrl.OnFileDropped -= HandleFileDropped;
             }
 
             if (windowSnapper != null)
@@ -159,11 +203,35 @@ namespace Annabeth
             {
                 locomotionController.OnWalkStateChanged -= HandleWalkStateChanged;
             }
+
+            // Feature #6: Unwire sleep events
+            if (sleepController != null)
+            {
+                sleepController.OnSleepStart -= HandleSleepStart;
+                sleepController.OnWakeUp -= HandleWakeUp;
+            }
+
+            // Feature #8: Unwire peek events
+            if (locomotionController != null)
+            {
+                locomotionController.OnPeekStateChanged -= HandlePeekStateChanged;
+            }
+
+            // Feature #11: Unwire pet detection
+            if (petDetectionController != null)
+                petDetectionController.OnPetDetected -= HandlePetDetected;
+
+            // Feature #15: Unwire alarm timer
+            if (alarmTimerManager != null)
+                alarmTimerManager.OnTimerFired -= HandleTimerFired;
         }
 
         private void OnVrmLoaded(UniVRM10.Vrm10Instance vrm)
         {
             Debug.Log("[CompanionManager] VRM loaded, initializing components...");
+
+            // Feature #12: Reset random message timer
+            _randomMsgTimer = GetRandomMsgInterval();
 
             // Find and initialize avatar sub-controllers
             lipSyncController = avatarController.GetComponentInChildren<LipSyncController>();
@@ -210,6 +278,47 @@ namespace Annabeth
             if (dragAnimController != null)
                 dragAnimController.Initialize(vrm);
 
+            // Sprint 3: Initialize walk animation controller
+            if (walkAnimController == null)
+                walkAnimController = FindFirstObjectByType<WalkAnimationController>();
+            if (walkAnimController != null)
+                walkAnimController.Initialize(vrm);
+
+            // Sprint 3: Initialize drag pose controller
+            if (dragPoseController == null)
+                dragPoseController = FindFirstObjectByType<DragPoseController>();
+            if (dragPoseController != null)
+                dragPoseController.Initialize(vrm);
+
+            // Sprint 3: Initialize pet detection
+            if (petDetectionController == null)
+                petDetectionController = FindFirstObjectByType<PetDetectionController>();
+            if (petDetectionController != null)
+            {
+                var headBoneForPet = avatarController.GetComponentInChildren<Animator>()
+                    ?.GetBoneTransform(HumanBodyBones.Head);
+                if (headBoneForPet != null)
+                    petDetectionController.SetHeadBone(headBoneForPet);
+            }
+
+            // Sprint 4: Initialize occluder quad manager
+            if (occluderQuadManager == null)
+                occluderQuadManager = FindFirstObjectByType<OccluderQuadManager>();
+
+            // Sprint 4: Initialize ambient probe
+            if (ambientProbe == null)
+                ambientProbe = FindFirstObjectByType<DesktopAmbientProbe>();
+
+            // Sprint 5: Initialize custom dance loader
+            if (customDanceLoader == null)
+                customDanceLoader = FindFirstObjectByType<CustomDanceLoader>();
+            if (customDanceLoader != null)
+            {
+                var animator = avatarController.GetComponentInChildren<Animator>();
+                if (animator != null)
+                    customDanceLoader.Initialize(animator);
+            }
+
             // Wire speech bubble to head bone
             if (speechBubble == null)
                 speechBubble = FindFirstObjectByType<SpeechBubble>();
@@ -224,6 +333,35 @@ namespace Annabeth
             // Apply user settings to all controllers now that VRM is ready
             if (SettingsManager.Instance != null)
                 SettingsManager.Instance.ApplyAllSettings();
+        }
+
+        // ── Feature #12: Random Messages ─────────────────────────────
+
+        private void Update()
+        {
+            // Feature #12: Fire random messages when idle and enabled
+            var settings = Core.SettingsManager.Instance;
+            if (settings == null || !settings.data.enableRandomMessages) return;
+            if (currentMode != CompanionMode.Idle) return;
+            if (isSpeaking || isSilenced) return;
+            if (sleepController != null && sleepController.IsSleeping) return;
+
+            _randomMsgTimer -= Time.deltaTime;
+            if (_randomMsgTimer <= 0f)
+            {
+                _randomMsgTimer = GetRandomMsgInterval();
+                string context = $"time={System.DateTime.Now:HH:mm}, idle_minutes={(_randomMsgTimer / 60f):F0}";
+                messageHandler?.SendRandomPrompt(context);
+            }
+        }
+
+        private float GetRandomMsgInterval()
+        {
+            float minutes = 10f;
+            if (Core.SettingsManager.Instance != null)
+                minutes = Core.SettingsManager.Instance.data.randomMessageIntervalMinutes;
+            // Add ±20% jitter
+            return minutes * 60f * Random.Range(0.8f, 1.2f);
         }
 
         // ── Event Handlers ──────────────────────────────────────────
@@ -255,11 +393,25 @@ namespace Annabeth
         private void HandleDragStart()
         {
             touchSoundHandler?.PlayDragStart();
+            // Feature #5: Notify WindowSnapper of drag for sit guard timer
+            windowSnapper?.NotifyDragStart();
+            // Feature #10: Switch to LookUp tracking during drag
+            eyeTrackingController?.SetTrackingMode(TrackingMode.LookUp);
+            // Feature #4: Blend in drag pose
+            if (dragPoseController != null)
+                TransitionAnimation(idleAnimationController, dragPoseController);
         }
 
         private void HandleDragEnd()
         {
             touchSoundHandler?.PlayDragEnd();
+            // Feature #5: Notify WindowSnapper of drag end (may trigger TrySitOnNearestWindow)
+            windowSnapper?.NotifyDragEnd();
+            // Feature #10: Restore tracking mode based on current state
+            RestoreTrackingMode();
+            // Feature #4: Blend out drag pose
+            if (dragPoseController != null)
+                TransitionAnimation(dragPoseController, idleAnimationController);
         }
 
         private void HandleTouchReaction(Vector3 hitPoint, bool isHead)
@@ -273,6 +425,9 @@ namespace Annabeth
         private void HandleSittingChanged(bool sitting)
         {
             Debug.Log($"[CompanionManager] Sitting: {sitting}");
+            // Feature #1: Enable/disable occluder quads when sitting on windows
+            if (occluderQuadManager != null && windowSnapper != null)
+                occluderQuadManager.SetEnabled(sitting, windowSnapper.SittingOnWindowHandle);
         }
 
         private void HandleFallStarted()
@@ -290,6 +445,87 @@ namespace Annabeth
         private void HandleWalkStateChanged(bool walking)
         {
             Debug.Log($"[CompanionManager] Walking: {walking}");
+            // Feature #3: Blend walk animation in/out
+            if (walking)
+                TransitionAnimation(idleAnimationController, walkAnimController);
+            else
+                TransitionAnimation(walkAnimController, idleAnimationController);
+        }
+
+        // ── Feature #8: Peek/Hide Handlers ──────────────────────────
+
+        private void HandlePeekStateChanged(bool peeking)
+        {
+            Debug.Log($"[CompanionManager] Peeking: {peeking}");
+            if (peeking)
+            {
+                // Determine peek direction: check if window is near left or right edge
+                float leanDir = locomotionController.GetWalkDirection() < 0 ? -1f : 1f;
+                idleAnimationController?.SetPeekLean(leanDir);
+            }
+            else
+            {
+                idleAnimationController?.SetPeekLean(0f);
+            }
+        }
+
+        // ── Feature #11: Pet Detection Handler ──────────────────────
+
+        private void HandlePetDetected()
+        {
+            Debug.Log("[CompanionManager] Pet detected!");
+            emotionController?.SetEmotion("happy");
+            speechBubble?.ShowText("~♪");
+        }
+
+        // ── Feature #13: File Drop Handler ──────────────────────────
+
+        private void HandleFileDropped(string filePath)
+        {
+            Debug.Log($"[CompanionManager] File dropped: {filePath}");
+            if (filePath.EndsWith(".vrm", System.StringComparison.OrdinalIgnoreCase) && avatarController != null)
+                _ = avatarController.LoadVRM(filePath, isAbsolutePath: true);
+        }
+
+        // ── Feature #15: Alarm/Timer Handler ────────────────────────
+
+        private void HandleTimerFired(TimerEntry timer)
+        {
+            Debug.Log($"[CompanionManager] Timer fired: {timer.label}");
+            emotionController?.SetEmotion("surprised");
+            speechBubble?.ShowText($"⏰ {timer.label} — Time's up!");
+        }
+
+        // ── Feature #6: Sleep Handlers ──────────────────────────────
+
+        private void HandleSleepStart()
+        {
+            Debug.Log("[CompanionManager] Sleep started");
+            blinkController?.ForceClose();
+            idleAnimationController?.SetSleeping(true);
+            eyeTrackingController?.SetTrackingMode(TrackingMode.Disabled);
+        }
+
+        private void HandleWakeUp()
+        {
+            Debug.Log("[CompanionManager] Waking up");
+            blinkController?.ForceOpen();
+            blinkController?.TriggerRapidBlinks(3);
+            idleAnimationController?.SetSleeping(false);
+            RestoreTrackingMode();
+        }
+
+        /// <summary>
+        /// Feature #10: Restore tracking mode based on current companion state.
+        /// </summary>
+        private void RestoreTrackingMode()
+        {
+            if (sleepController != null && sleepController.IsSleeping)
+                eyeTrackingController?.SetTrackingMode(TrackingMode.Disabled);
+            else if (currentMode == CompanionMode.Dance)
+                eyeTrackingController?.SetTrackingMode(TrackingMode.Reduced);
+            else
+                eyeTrackingController?.SetTrackingMode(TrackingMode.Normal);
         }
 
         private void HandleModeChange(CompanionMode mode)
@@ -313,16 +549,20 @@ namespace Annabeth
             {
                 case CompanionMode.Active:
                     eyeTrackingController?.SetEnabled(true);
+                    eyeTrackingController?.SetTrackingMode(TrackingMode.Normal);
                     TransitionAnimation(beatDanceController, idleAnimationController);
                     break;
 
                 case CompanionMode.Idle:
                     eyeTrackingController?.SetEnabled(true);
+                    eyeTrackingController?.SetTrackingMode(TrackingMode.Normal);
                     TransitionAnimation(beatDanceController, idleAnimationController);
                     emotionController?.ClearEmotion();
                     break;
 
                 case CompanionMode.Dance:
+                    // Feature #10: Reduced tracking during dance
+                    eyeTrackingController?.SetTrackingMode(TrackingMode.Reduced);
                     if (currentDanceStyle == DanceStyle.Procedural)
                     {
                         beatDanceController?.StartDancing();

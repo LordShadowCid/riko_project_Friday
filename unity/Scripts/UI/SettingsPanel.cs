@@ -18,6 +18,9 @@ namespace Annabeth.UI
         private Toggle _toggleAlwaysOnTop;
         private Slider _sliderAvatarSize;
         private Text _labelAvatarSize;
+        private Slider _sliderGraphicsQuality;
+        private Text _labelGraphicsQuality;
+        private Text _labelCurrentModel;
 
         // Tracking
         private Toggle _toggleMouseTracking;
@@ -42,6 +45,9 @@ namespace Annabeth.UI
         // Dance
         private Slider _sliderDanceTransition;
         private Text _labelDanceTransition;
+        private Slider _sliderSoundThreshold;
+        private Text _labelSoundThreshold;
+        private InputField _inputSoundFilterApps;
 
         // Interaction
         private Toggle _toggleParticles;
@@ -51,6 +57,9 @@ namespace Annabeth.UI
 
         // AI
         private Toggle _toggleSpeechBubble;
+        private Toggle _toggleRandomMessages;
+        private Slider _sliderRandomMsgInterval;
+        private Text _labelRandomMsgInterval;
 
         // System
         private Toggle _toggleSleepMode;
@@ -110,6 +119,13 @@ namespace Annabeth.UI
             (_sliderFPS, _labelFPS) = UIFactory.CreateSliderRow(content, "FPS", "FPS Limit", 15, 165, true, rowSize);
             _toggleAlwaysOnTop = UIFactory.CreateToggle(content, "AlwaysOnTop", "Always On Top", toggleSize);
             (_sliderAvatarSize, _labelAvatarSize) = UIFactory.CreateSliderRow(content, "AvatarSize", "Avatar Size", 0.5f, 2f, false, rowSize);
+            (_sliderGraphicsQuality, _labelGraphicsQuality) = UIFactory.CreateSliderRow(content, "GfxQuality", "Graphics Quality", 0, 2, true, rowSize);
+
+            // Current model info (Feature #14)
+            var modelInfo = GetCurrentModelInfoText();
+            _labelCurrentModel = UIFactory.CreateLabel(content, "CurrentModel", $"Model: {modelInfo}", rowSize);
+            _labelCurrentModel.fontSize = 12;
+            _labelCurrentModel.fontStyle = FontStyle.Italic;
 
             UIFactory.CreateSeparator(content, rowSize.x);
 
@@ -135,6 +151,8 @@ namespace Annabeth.UI
             // ── Dance ───────────────
             UIFactory.CreateSectionHeader(content, "Dance", rowSize);
             (_sliderDanceTransition, _labelDanceTransition) = UIFactory.CreateSliderRow(content, "DanceTrans", "Dance Transition", 0.1f, 3f, false, rowSize);
+            (_sliderSoundThreshold, _labelSoundThreshold) = UIFactory.CreateSliderRow(content, "SoundThresh", "Sound Threshold", 0f, 0.5f, false, rowSize);
+            (_inputSoundFilterApps, _) = UIFactory.CreateInputFieldRow(content, "SoundFilter", "Audio Apps Filter", "e.g. spotify,vlc", rowSize);
 
             UIFactory.CreateSeparator(content, rowSize.x);
 
@@ -149,6 +167,8 @@ namespace Annabeth.UI
             // ── AI / Speech ─────────
             UIFactory.CreateSectionHeader(content, "AI / Speech", rowSize);
             _toggleSpeechBubble = UIFactory.CreateToggle(content, "SpeechBubble", "Speech Bubble", toggleSize);
+            _toggleRandomMessages = UIFactory.CreateToggle(content, "RandomMsgs", "Random AI Messages", toggleSize);
+            (_sliderRandomMsgInterval, _labelRandomMsgInterval) = UIFactory.CreateSliderRow(content, "RandomMsgInt", "Message Interval (min)", 5f, 30f, true, rowSize);
 
             UIFactory.CreateSeparator(content, rowSize.x);
 
@@ -175,6 +195,7 @@ namespace Annabeth.UI
             _sliderFPS?.onValueChanged.AddListener(OnFPSChanged);
             _toggleAlwaysOnTop?.onValueChanged.AddListener(OnAlwaysOnTopChanged);
             _sliderAvatarSize?.onValueChanged.AddListener(OnAvatarSizeChanged);
+            _sliderGraphicsQuality?.onValueChanged.AddListener(OnGraphicsQualityChanged);
 
             _toggleMouseTracking?.onValueChanged.AddListener(OnMouseTrackingChanged);
             _sliderEyeBlend?.onValueChanged.AddListener(OnEyeBlendChanged);
@@ -188,12 +209,16 @@ namespace Annabeth.UI
             _sliderSwayIntensity?.onValueChanged.AddListener(OnSwayIntensityChanged);
 
             _sliderDanceTransition?.onValueChanged.AddListener(OnDanceTransitionChanged);
+            _sliderSoundThreshold?.onValueChanged.AddListener(OnSoundThresholdChanged);
+            _inputSoundFilterApps?.onEndEdit.AddListener(OnSoundFilterAppsChanged);
 
             _toggleParticles?.onValueChanged.AddListener(OnParticlesChanged);
             _toggleTouchSounds?.onValueChanged.AddListener(OnTouchSoundsChanged);
             _sliderSFXVolume?.onValueChanged.AddListener(OnSFXVolumeChanged);
 
             _toggleSpeechBubble?.onValueChanged.AddListener(OnSpeechBubbleChanged);
+            _toggleRandomMessages?.onValueChanged.AddListener(OnRandomMessagesChanged);
+            _sliderRandomMsgInterval?.onValueChanged.AddListener(OnRandomMsgIntervalChanged);
 
             _toggleSleepMode?.onValueChanged.AddListener(OnSleepModeChanged);
             _sliderSleepTimer?.onValueChanged.AddListener(OnSleepTimerChanged);
@@ -210,6 +235,7 @@ namespace Annabeth.UI
             _sliderFPS?.onValueChanged.RemoveListener(OnFPSChanged);
             _toggleAlwaysOnTop?.onValueChanged.RemoveListener(OnAlwaysOnTopChanged);
             _sliderAvatarSize?.onValueChanged.RemoveListener(OnAvatarSizeChanged);
+            _sliderGraphicsQuality?.onValueChanged.RemoveListener(OnGraphicsQualityChanged);
 
             _toggleMouseTracking?.onValueChanged.RemoveListener(OnMouseTrackingChanged);
             _sliderEyeBlend?.onValueChanged.RemoveListener(OnEyeBlendChanged);
@@ -223,12 +249,16 @@ namespace Annabeth.UI
             _sliderSwayIntensity?.onValueChanged.RemoveListener(OnSwayIntensityChanged);
 
             _sliderDanceTransition?.onValueChanged.RemoveListener(OnDanceTransitionChanged);
+            _sliderSoundThreshold?.onValueChanged.RemoveListener(OnSoundThresholdChanged);
+            _inputSoundFilterApps?.onEndEdit.RemoveListener(OnSoundFilterAppsChanged);
 
             _toggleParticles?.onValueChanged.RemoveListener(OnParticlesChanged);
             _toggleTouchSounds?.onValueChanged.RemoveListener(OnTouchSoundsChanged);
             _sliderSFXVolume?.onValueChanged.RemoveListener(OnSFXVolumeChanged);
 
             _toggleSpeechBubble?.onValueChanged.RemoveListener(OnSpeechBubbleChanged);
+            _toggleRandomMessages?.onValueChanged.RemoveListener(OnRandomMessagesChanged);
+            _sliderRandomMsgInterval?.onValueChanged.RemoveListener(OnRandomMsgIntervalChanged);
 
             _toggleSleepMode?.onValueChanged.RemoveListener(OnSleepModeChanged);
             _sliderSleepTimer?.onValueChanged.RemoveListener(OnSleepTimerChanged);
@@ -256,6 +286,10 @@ namespace Annabeth.UI
             _toggleAlwaysOnTop?.SetIsOnWithoutNotify(d.alwaysOnTop);
             _sliderAvatarSize?.SetValueWithoutNotify(d.avatarSize);
             UpdateLabel(_labelAvatarSize, $"{d.avatarSize:F1}x");
+            _sliderGraphicsQuality?.SetValueWithoutNotify(d.graphicsQuality);
+            string[] qualityNames = { "Low", "Medium", "High" };
+            UpdateLabel(_labelGraphicsQuality, qualityNames[Mathf.Clamp(d.graphicsQuality, 0, 2)]);
+            UpdateLabel(_labelCurrentModel, $"Model: {GetCurrentModelInfoText()}");
 
             // Tracking
             _toggleMouseTracking?.SetIsOnWithoutNotify(d.enableMouseTracking);
@@ -280,6 +314,10 @@ namespace Annabeth.UI
             // Dance
             _sliderDanceTransition?.SetValueWithoutNotify(d.danceTransitionSpeed);
             UpdateLabel(_labelDanceTransition, $"{d.danceTransitionSpeed:F1}s");
+            _sliderSoundThreshold?.SetValueWithoutNotify(d.soundThreshold);
+            UpdateLabel(_labelSoundThreshold, $"{d.soundThreshold:F3}");
+            if (_inputSoundFilterApps != null)
+                _inputSoundFilterApps.text = d.soundFilterApps;
 
             // Interaction
             _toggleParticles?.SetIsOnWithoutNotify(d.enableParticles);
@@ -289,6 +327,9 @@ namespace Annabeth.UI
 
             // AI
             _toggleSpeechBubble?.SetIsOnWithoutNotify(d.enableSpeechBubble);
+            _toggleRandomMessages?.SetIsOnWithoutNotify(d.enableRandomMessages);
+            _sliderRandomMsgInterval?.SetValueWithoutNotify(d.randomMessageIntervalMinutes);
+            UpdateLabel(_labelRandomMsgInterval, $"{d.randomMessageIntervalMinutes:F0} min");
 
             // System
             _toggleSleepMode?.SetIsOnWithoutNotify(d.enableSleepMode);
@@ -470,6 +511,46 @@ namespace Annabeth.UI
             SaveAndApply();
         }
 
+        private void OnGraphicsQualityChanged(float val)
+        {
+            if (_loading) return;
+            int q = Mathf.RoundToInt(val);
+            Data.graphicsQuality = q;
+            string[] qualityNames = { "Low", "Medium", "High" };
+            UpdateLabel(_labelGraphicsQuality, qualityNames[Mathf.Clamp(q, 0, 2)]);
+            SaveAndApply();
+        }
+
+        private void OnRandomMessagesChanged(bool val)
+        {
+            if (_loading) return;
+            Data.enableRandomMessages = val;
+            SaveAndApply();
+        }
+
+        private void OnRandomMsgIntervalChanged(float val)
+        {
+            if (_loading) return;
+            Data.randomMessageIntervalMinutes = Mathf.Round(val);
+            UpdateLabel(_labelRandomMsgInterval, $"{Data.randomMessageIntervalMinutes:F0} min");
+            SaveAndApply();
+        }
+
+        private void OnSoundThresholdChanged(float val)
+        {
+            if (_loading) return;
+            Data.soundThreshold = val;
+            UpdateLabel(_labelSoundThreshold, $"{val:F3}");
+            SaveAndApply();
+        }
+
+        private void OnSoundFilterAppsChanged(string val)
+        {
+            if (_loading) return;
+            Data.soundFilterApps = val;
+            SaveAndApply();
+        }
+
         // ── Button Handlers ─────────────────────────────────────
 
         private void OnResetDefaults()
@@ -502,6 +583,12 @@ namespace Annabeth.UI
         {
             if (label != null)
                 label.text = text;
+        }
+
+        private string GetCurrentModelInfoText()
+        {
+            var lib = FindFirstObjectByType<Avatar.VrmModelLibrary>();
+            return lib != null ? lib.GetCurrentModelInfo() : "Claire (Default)";
         }
     }
 }

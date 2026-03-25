@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 using UnityEngine;
 using UnityEngine.Rendering.Universal;
 using Annabeth.UI;
@@ -64,17 +65,33 @@ namespace Annabeth.Core
         [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
         [DllImport("user32.dll")] static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
         [DllImport("dwmapi.dll")] static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref MARGINS pMarInset);
+
+        // Feature #13: File drop
+        [DllImport("shell32.dll")] static extern void DragAcceptFiles(IntPtr hWnd, bool fAccept);
+        [DllImport("shell32.dll")] static extern uint DragQueryFileW(IntPtr hDrop, uint iFile, [Out] StringBuilder lpszFile, uint cch);
+        [DllImport("shell32.dll")] static extern void DragFinish(IntPtr hDrop);
+        [DllImport("comctl32.dll")] static extern bool SetWindowSubclass(IntPtr hWnd, SubclassProc pfnSubclass, UIntPtr uIdSubclass, IntPtr dwRefData);
+        [DllImport("comctl32.dll")] static extern bool RemoveWindowSubclass(IntPtr hWnd, SubclassProc pfnSubclass, UIntPtr uIdSubclass);
+        [DllImport("comctl32.dll")] static extern IntPtr DefSubclassProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam);
+
+        delegate IntPtr SubclassProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam, UIntPtr uIdSubclass, IntPtr dwRefData);
+
+        const uint WM_DROPFILES = 0x0233;
 #endif
 
         /// <summary>Fired when the user starts dragging the window.</summary>
         public event Action OnDragStart;
         /// <summary>Fired when the user stops dragging the window.</summary>
         public event Action OnDragEnd;
+        /// <summary>Feature #13: Fired when a file is dropped onto the window.</summary>
+        public event Action<string> OnFileDropped;
 
         [Header("Window Settings")]
         [SerializeField] private bool transparent = true;
         [SerializeField] private bool alwaysOnTop = true;
         [SerializeField] private bool hideFromTaskbar = true;
+        [SerializeField] private bool useOpacityHitTest = false;
+        [SerializeField] private float clickThroughAlphaThreshold = 0.1f;
 
 #if UNITY_STANDALONE_WIN && !UNITY_EDITOR
         private IntPtr _hwnd;
@@ -85,6 +102,19 @@ namespace Annabeth.Core
         private RECT _dragStartRect;
         private bool _cursorOverCharacter;
         private bool _clickThroughActive;
+
+        // Smooth drag (Feature #21)
+        private float _dragVelX, _dragVelY;
+        private float _smoothDragX, _smoothDragY;
+        private const float DragSmoothTime = 0.04f;
+
+        // Feature #13: File drop subclass
+        private SubclassProc _subclassDelegate;
+        private string _pendingDropFile;
+
+        // Feature #20: Opacity hit test
+        private RenderTexture _hitTestRT;
+        private Texture2D _hitTestTex;
 #endif
 
         private void Start()
@@ -100,6 +130,12 @@ namespace Annabeth.Core
             _cam = Camera.main;
             ConfigureCamera();
             ApplyWindowStyle();
+
+            // Feature #13: Enable file drop
+            DragAcceptFiles(_hwnd, true);
+            _subclassDelegate = FileDropSubclassProc;
+            SetWindowSubclass(_hwnd, _subclassDelegate, (UIntPtr)1, IntPtr.Zero);
+
             Debug.Log("[TransparentWindow] Window configured: transparent, topmost, click-through on empty areas.");
 #else
             Debug.Log("[TransparentWindow] Only active in Windows standalone builds.");
@@ -112,6 +148,40 @@ namespace Annabeth.Core
             CacheRenderersIfNeeded();
             UpdateClickThrough();
             HandleDrag();
+
+            // Feature #13: Process file drops on main thread
+            if (_pendingDropFile != null)
+            {
+                string file = _pendingDropFile;
+                _pendingDropFile = null;
+                OnFileDropped?.Invoke(file);
+            }
+        }
+
+        /// <summary>Feature #13: WndProc subclass to intercept WM_DROPFILES messages.</summary>
+        private IntPtr FileDropSubclassProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam, UIntPtr uIdSubclass, IntPtr dwRefData)
+        {
+            if (uMsg == WM_DROPFILES)
+            {
+                var sb = new StringBuilder(260);
+                uint count = DragQueryFileW(wParam, 0xFFFFFFFF, null, 0);
+                if (count > 0)
+                {
+                    DragQueryFileW(wParam, 0, sb, 260);
+                    string path = sb.ToString();
+                    if (path.EndsWith(".vrm", StringComparison.OrdinalIgnoreCase))
+                        _pendingDropFile = path;
+                }
+                DragFinish(wParam);
+                return IntPtr.Zero;
+            }
+            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+        }
+
+        private void OnDestroy()
+        {
+            if (_hwnd != IntPtr.Zero && _subclassDelegate != null)
+                RemoveWindowSubclass(_hwnd, _subclassDelegate, (UIntPtr)1);
         }
 
         /// <summary>
@@ -167,7 +237,14 @@ namespace Annabeth.Core
 
         bool IsMouseOverCharacter()
         {
-            if (_renderers == null || _renderers.Length == 0 || _cam == null) return false;
+            if (_cam == null) return false;
+
+            // Feature #20: Opacity-based hit test (reads rendered pixel alpha)
+            if (useOpacityHitTest)
+                return IsMouseOverCharacterOpacity();
+
+            // Default: bounds raycast
+            if (_renderers == null || _renderers.Length == 0) return false;
 
             Vector3 mousePos = UnityEngine.Input.mousePosition;
             Ray ray = _cam.ScreenPointToRay(mousePos);
@@ -178,6 +255,37 @@ namespace Annabeth.Core
                     return true;
             }
             return false;
+        }
+
+        /// <summary>
+        /// Feature #20: Read rendered pixel alpha at cursor position.
+        /// Only captures clicks where avatar alpha exceeds threshold.
+        /// </summary>
+        bool IsMouseOverCharacterOpacity()
+        {
+            if (_cam.targetTexture == null) return false;
+
+            Vector3 mousePos = UnityEngine.Input.mousePosition;
+            int px = Mathf.Clamp((int)mousePos.x, 0, Screen.width - 1);
+            int py = Mathf.Clamp((int)mousePos.y, 0, Screen.height - 1);
+
+            // Create small textures for single-pixel read
+            if (_hitTestRT == null)
+                _hitTestRT = new RenderTexture(1, 1, 0, RenderTextureFormat.ARGB32);
+            if (_hitTestTex == null)
+                _hitTestTex = new Texture2D(1, 1, TextureFormat.ARGB32, false);
+
+            // Blit the single pixel from the camera target
+            var src = _cam.targetTexture;
+            Graphics.CopyTexture(src, 0, 0, px, py, 1, 1, _hitTestRT, 0, 0, 0, 0);
+
+            RenderTexture.active = _hitTestRT;
+            _hitTestTex.ReadPixels(new Rect(0, 0, 1, 1), 0, 0, false);
+            _hitTestTex.Apply();
+            RenderTexture.active = null;
+
+            float alpha = _hitTestTex.GetPixel(0, 0).a;
+            return alpha > clickThroughAlphaThreshold;
         }
 
         void SetClickThroughInternal(bool passThrough)
@@ -247,6 +355,10 @@ namespace Annabeth.Core
                 GetCursorPos(out _dragStartCursor);
                 GetWindowRect(_hwnd, out _dragStartRect);
                 _dragging = true;
+                _smoothDragX = _dragStartRect.Left;
+                _smoothDragY = _dragStartRect.Top;
+                _dragVelX = 0f;
+                _dragVelY = 0f;
                 OnDragStart?.Invoke();
             }
 
@@ -257,7 +369,12 @@ namespace Annabeth.Core
                 int dy = current.Y - _dragStartCursor.Y;
                 int w = _dragStartRect.Right - _dragStartRect.Left;
                 int h = _dragStartRect.Bottom - _dragStartRect.Top;
-                MoveWindow(_hwnd, _dragStartRect.Left + dx, _dragStartRect.Top + dy, w, h, true);
+                float targetX = _dragStartRect.Left + dx;
+                float targetY = _dragStartRect.Top + dy;
+                // Feature #21: SmoothDamp for fluid drag movement
+                _smoothDragX = Mathf.SmoothDamp(_smoothDragX, targetX, ref _dragVelX, DragSmoothTime);
+                _smoothDragY = Mathf.SmoothDamp(_smoothDragY, targetY, ref _dragVelY, DragSmoothTime);
+                MoveWindow(_hwnd, (int)_smoothDragX, (int)_smoothDragY, w, h, true);
             }
 
             if (UnityEngine.Input.GetMouseButtonUp(0) && _dragging)

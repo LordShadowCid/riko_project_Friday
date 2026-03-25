@@ -85,7 +85,17 @@ namespace Annabeth.Avatar
         {
             _isBlinking = false;
             _expression.SetWeight(ExpressionKey.Blink, 0f);
-            ScheduleNextBlink();
+
+            if (_rapidBlinksRemaining > 0)
+            {
+                _rapidBlinksRemaining--;
+                _nextBlinkTime = 0.15f;
+                _blinkTimer = 0f;
+            }
+            else
+            {
+                ScheduleNextBlink();
+            }
         }
 
         public void TriggerBlink()
@@ -105,5 +115,32 @@ namespace Annabeth.Avatar
                 _isBlinking = false;
             }
         }
+
+        /// <summary>Feature #6: Force eyes closed (sleep mode).</summary>
+        public void ForceClose()
+        {
+            autoBlinkEnabled = false;
+            _isBlinking = false;
+            _expression?.SetWeight(ExpressionKey.Blink, 1f);
+        }
+
+        /// <summary>Feature #6: Release forced close, resume auto-blink.</summary>
+        public void ForceOpen()
+        {
+            _expression?.SetWeight(ExpressionKey.Blink, 0f);
+            autoBlinkEnabled = true;
+            ScheduleNextBlink();
+        }
+
+        /// <summary>Feature #6: Trigger rapid blinks (wake-up sequence).</summary>
+        public void TriggerRapidBlinks(int count = 3)
+        {
+            ForceOpen();
+            _rapidBlinksRemaining = count;
+            _nextBlinkTime = 0.15f;
+            _blinkTimer = 0f;
+        }
+
+        private int _rapidBlinksRemaining;
     }
 }

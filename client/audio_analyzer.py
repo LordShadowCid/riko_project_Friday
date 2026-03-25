@@ -46,6 +46,10 @@ class SystemAudioAnalyzer:
         self.smooth_high = 0.0
         self.smooth_factor = 0.3
         
+        # Feature #24: Configurable noise floor and app filter
+        self.noise_floor = 0.02
+        self.filter_apps = []  # List of app names to filter (empty = all)
+        
         # PyAudio
         self.p = None
         self.stream = None
@@ -217,10 +221,10 @@ class SystemAudioAnalyzer:
         raw_high = np.sqrt(np.mean(fft[high_mask]**2)) * 10 if np.any(high_mask) else 0
         
         # Noise gate: zero out energy below ambient noise floor
-        noise_floor = 0.02
-        if raw_bass < noise_floor: raw_bass = 0.0
-        if raw_mid < noise_floor: raw_mid = 0.0
-        if raw_high < noise_floor: raw_high = 0.0
+        nf = self.noise_floor
+        if raw_bass < nf: raw_bass = 0.0
+        if raw_mid < nf: raw_mid = 0.0
+        if raw_high < nf: raw_high = 0.0
         
         # Smooth
         self.smooth_bass = self.smooth_bass * (1 - self.smooth_factor) + raw_bass * self.smooth_factor
@@ -268,6 +272,18 @@ class SystemAudioAnalyzer:
     def get_analysis_json(self):
         """Get the current analysis results as a JSON string."""
         return json.dumps(self.get_analysis())
+
+    def update_config(self, sound_threshold=None, filter_apps=None):
+        """Feature #24: Update audio config from Unity settings."""
+        if sound_threshold is not None:
+            self.noise_floor = max(0.0, min(0.5, float(sound_threshold)))
+            print(f"[Audio] Noise floor set to {self.noise_floor:.3f}")
+        if filter_apps is not None:
+            if isinstance(filter_apps, str):
+                self.filter_apps = [a.strip().lower() for a in filter_apps.split(",") if a.strip()]
+            else:
+                self.filter_apps = [str(a).lower() for a in filter_apps]
+            print(f"[Audio] App filter: {self.filter_apps if self.filter_apps else '(all)'}")
 
 
 # Standalone test with visual feedback

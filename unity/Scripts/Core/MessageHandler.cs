@@ -15,6 +15,7 @@ namespace Annabeth.Core
         public const string SET_SILENCE = "set_silence";
         public const string READ_PAUSE = "read_pause";
         public const string READ_RESUME = "read_resume";
+        public const string RANDOM_PROMPT = "random_prompt";
 
         // Server → Client
         public const string SPEAK_START = "speak_start";
@@ -242,6 +243,15 @@ namespace Annabeth.Core
         public void SendReadResume()
         {
             webSocketClient?.Send(MessageTypes.READ_RESUME);
+        }
+
+        /// <summary>Feature #12: Send a random conversation prompt to the AI backend.</summary>
+        public void SendRandomPrompt(string context)
+        {
+            webSocketClient?.Send(MessageTypes.RANDOM_PROMPT, new Dictionary<string, object>
+            {
+                ["context"] = context
+            });
         }
     }
 }

@@ -118,6 +118,14 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
                             print("[Avatar] Not currently paused")
                     except Exception as e:
                         print(f"[Avatar] Read resume error: {e}")
+
+                elif msg_type == 'audio_config':
+                    # Feature #24: Update audio analyzer config from Unity
+                    if _audio_analyzer:
+                        _audio_analyzer.update_config(
+                            sound_threshold=data.get('sound_threshold'),
+                            filter_apps=data.get('filter_apps')
+                        )
                     
                 else:
                     print(f"[Avatar] Received: {data}")

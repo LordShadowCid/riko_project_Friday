@@ -113,6 +113,28 @@ namespace Annabeth.Core
             // Start with Windows
             ApplyStartWithWindows();
 
+            // Graphics quality (Feature #23)
+            QualitySettings.SetQualityLevel(data.graphicsQuality, true);
+
+            // Feature #24: Send audio threshold/filter to Python backend
+            var ws = FindFirstObjectByType<WebSocketClient>();
+            if (ws != null)
+            {
+                ws.Send("audio_config", new System.Collections.Generic.Dictionary<string, object>
+                {
+                    { "sound_threshold", data.soundThreshold },
+                    { "filter_apps", data.soundFilterApps }
+                });
+            }
+
+            // Feature #9: Ambient probe settings
+            var ambient = FindFirstObjectByType<DesktopAmbientProbe>();
+            if (ambient != null)
+            {
+                ambient.SetEnabled(data.enableAmbientProbe);
+                ambient.SetIntensity(data.ambientProbeIntensity);
+            }
+
             Debug.Log("[SettingsManager] Applied all settings.");
         }
 
@@ -226,6 +248,20 @@ namespace Annabeth.Core
                 Debug.Log("[SettingsManager] Migrated v1 → v2 (spine tracking, sway, dance transitions).");
             }
 
+            // ── Version 2 → 3: Feature Gap Plan additions ──
+            if (data.settingsVersion < 3)
+            {
+                data.graphicsQuality = 1;
+                data.enableRandomMessages = false;
+                data.randomMessageIntervalMinutes = 10f;
+                data.enableAmbientProbe = false;
+                data.ambientProbeIntensity = 0.5f;
+                data.soundThreshold = 0.02f;
+                data.soundFilterApps = "";
+                data.settingsVersion = 3;
+                Debug.Log("[SettingsManager] Migrated v2 → v3 (graphics quality, random messages, ambient, audio filter).");
+            }
+
             // Range clamping (always runs)
             data.fpsLimit = Mathf.Clamp(data.fpsLimit, 15, 165);
             data.sleepTimerSeconds = Mathf.Clamp(data.sleepTimerSeconds, 30f, 360f);
@@ -241,6 +277,12 @@ namespace Annabeth.Core
             data.swaySpringFrequency = Mathf.Clamp(data.swaySpringFrequency, 0.5f, 10f);
             data.swayDampingRatio = Mathf.Clamp(data.swayDampingRatio, 0.05f, 1f);
             data.danceTransitionSpeed = Mathf.Clamp(data.danceTransitionSpeed, 0.1f, 3f);
+
+            // v3 clamping
+            data.graphicsQuality = Mathf.Clamp(data.graphicsQuality, 0, 2);
+            data.randomMessageIntervalMinutes = Mathf.Clamp(data.randomMessageIntervalMinutes, 5f, 30f);
+            data.ambientProbeIntensity = Mathf.Clamp01(data.ambientProbeIntensity);
+            data.soundThreshold = Mathf.Clamp(data.soundThreshold, 0f, 0.5f);
         }
     }
 
@@ -252,7 +294,7 @@ namespace Annabeth.Core
     public class SettingsData
     {
         // Version for migration — bump when adding new fields
-        public int settingsVersion = 2;
+        public int settingsVersion = 3;
 
         // ── Display ─────────────────────────────────────────
         public int fpsLimit = 60;
@@ -297,5 +339,14 @@ namespace Annabeth.Core
         public bool enableAutoMemoryTrim = false;
         public bool minimizeToTray = true;
         public bool startWithWindows = false;
+
+        // ── v3: Feature Gap Plan additions ──────────────────
+        public int graphicsQuality = 1;               // 0=Low, 1=Medium, 2=High
+        public bool enableRandomMessages = false;      // AI random messages (#12)
+        public float randomMessageIntervalMinutes = 10f; // 5-30 min range
+        public bool enableAmbientProbe = false;        // Desktop ambient lighting (#9)
+        public float ambientProbeIntensity = 0.5f;     // 0..1
+        public float soundThreshold = 0.02f;           // Audio threshold for dance (#24)
+        public string soundFilterApps = "";            // Comma-separated app names (#24)
     }
 }

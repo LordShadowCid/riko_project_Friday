@@ -67,6 +67,11 @@ namespace Annabeth.Core
 
         /// <summary>True when avatar is sitting (on taskbar or window top).</summary>
         public bool IsSitting { get; private set; }
+#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+        public System.IntPtr SittingOnWindowHandle => _sittingOnWindow;
+#else
+        public System.IntPtr SittingOnWindowHandle => System.IntPtr.Zero;
+#endif
         /// <summary>True when avatar is falling due to gravity.</summary>
         public bool IsFalling { get; private set; }
 
@@ -89,6 +94,15 @@ namespace Annabeth.Core
         private IntPtr _sittingOnWindow;
         private RECT _sittingWindowRect;
         private float _sittingCheckTimer;
+
+        // Drag-hold sit guard (Feature #5)
+        private float _dragHoldTimer;
+        private const float MinDragHoldToSit = 1.0f;
+        private bool _isDragActive;
+
+        // SmoothDamp following (Feature #2)
+        private float _followVelX, _followVelY;
+        private const float FollowSmoothTime = 0.08f;
 
         // Gravity state
         private float _fallVelocity;
@@ -119,6 +133,9 @@ namespace Annabeth.Core
                 ExecuteFall();
                 return;
             }
+
+            // Drag-hold timer for sit guard (Feature #5)
+            if (_isDragActive) _dragHoldTimer += Time.deltaTime;
 
             // Double right-click to sit on taskbar
             if (UnityEngine.Input.GetMouseButtonDown(1))
@@ -199,9 +216,12 @@ namespace Annabeth.Core
         /// <summary>
         /// Try to sit on the nearest visible window title bar beneath the avatar.
         /// Called externally (e.g., by hotkey or drag-end near a window top).
+        /// Respects drag-hold guard: only sits after holding drag for MinDragHoldToSit seconds.
         /// </summary>
         public void TrySitOnNearestWindow()
         {
+            // Feature #5: Drag-hold guard — prevent accidental sits during quick repositioning
+            if (_isDragActive && _dragHoldTimer < MinDragHoldToSit) return;
             GetWindowRect(_hwnd, out RECT myRect);
             int myCenterX = (myRect.Left + myRect.Right) / 2;
             int myBottom = myRect.Bottom;
@@ -286,17 +306,20 @@ namespace Annabeth.Core
                 return;
             }
 
-            // Window moved a bit — follow it
+            // Window moved a bit — follow it with SmoothDamp (Feature #2)
             if (wr.Top != _sittingWindowRect.Top || wr.Left != _sittingWindowRect.Left)
             {
                 GetWindowRect(_hwnd, out RECT myRect);
                 int myW = myRect.Right - myRect.Left;
                 int myH = myRect.Bottom - myRect.Top;
                 int offsetX = myRect.Left - _sittingWindowRect.Left;
-                int newX = wr.Left + offsetX;
-                int newY = wr.Top - myH;
-                newX = Mathf.Clamp(newX, wr.Left, wr.Right - myW);
-                MoveWindow(_hwnd, newX, newY, myW, myH, true);
+                int targetX = wr.Left + offsetX;
+                int targetY = wr.Top - myH;
+                targetX = Mathf.Clamp(targetX, wr.Left, wr.Right - myW);
+
+                float smoothX = Mathf.SmoothDamp(myRect.Left, targetX, ref _followVelX, FollowSmoothTime);
+                float smoothY = Mathf.SmoothDamp(myRect.Top, targetY, ref _followVelY, FollowSmoothTime);
+                MoveWindow(_hwnd, (int)smoothX, (int)smoothY, myW, myH, false);
                 _sittingWindowRect = wr;
             }
         }
@@ -384,6 +407,24 @@ namespace Annabeth.Core
         /// Get the taskbar height in pixels.
         /// </summary>
         public int GetTaskbarHeight() => _taskbarH;
+
+        // ── Drag-Hold Sit Guard (Feature #5) ────────────────────
+
+        /// <summary>Call from CompanionManager when drag starts.</summary>
+        public void NotifyDragStart()
+        {
+            _isDragActive = true;
+            _dragHoldTimer = 0f;
+        }
+
+        /// <summary>Call from CompanionManager when drag ends.</summary>
+        public void NotifyDragEnd()
+        {
+            if (_isDragActive && _dragHoldTimer >= MinDragHoldToSit)
+                TrySitOnNearestWindow();
+            _isDragActive = false;
+            _dragHoldTimer = 0f;
+        }
 #else
         private void Start()
         {
@@ -392,6 +433,8 @@ namespace Annabeth.Core
 
         public void TrySitOnNearestWindow() { }
         public int GetTaskbarHeight() => 0;
+        public void NotifyDragStart() { }
+        public void NotifyDragEnd() { }
 #endif
     }
 }

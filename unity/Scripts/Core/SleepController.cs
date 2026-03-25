@@ -21,6 +21,10 @@ namespace Annabeth.Core
 
         public bool IsSleeping { get; private set; }
         public event Action<bool> OnSleepStateChanged;
+        /// <summary>Fired when entering sleep — for animation controllers.</summary>
+        public event Action OnSleepStart;
+        /// <summary>Fired when waking up — for animation controllers.</summary>
+        public event Action OnWakeUp;
 
         float _fallbackLastInput;
 
@@ -64,6 +68,8 @@ namespace Annabeth.Core
             eyes?.SetEnabled(!sleeping);
 
             OnSleepStateChanged?.Invoke(sleeping);
+            if (sleeping) OnSleepStart?.Invoke();
+            else OnWakeUp?.Invoke();
             Debug.Log($"[SleepController] {(sleeping ? "Sleeping" : "Awake")}");
         }
 

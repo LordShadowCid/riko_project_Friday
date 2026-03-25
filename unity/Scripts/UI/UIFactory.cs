@@ -318,6 +318,28 @@ namespace Annabeth.UI
             return txt;
         }
 
+        // ── Label (sized row with text) ─────────────────────────
+
+        /// <summary>
+        /// Creates a single-line text label inside a layout-compatible row.
+        /// </summary>
+        public static Text CreateLabel(Transform parent, string name, string text,
+            Vector2 rowSize, int fontSize = 13)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            var rt = go.AddComponent<RectTransform>();
+            rt.sizeDelta = rowSize;
+
+            var txt = go.AddComponent<Text>();
+            txt.text = text;
+            txt.font = DefaultFont;
+            txt.fontSize = fontSize;
+            txt.alignment = TextAnchor.MiddleLeft;
+            txt.color = TextColor;
+            return txt;
+        }
+
         // ── Separator Line ──────────────────────────────────────
 
         public static void CreateSeparator(Transform parent, float width)
@@ -328,6 +350,76 @@ namespace Annabeth.UI
             rt.sizeDelta = new Vector2(width, 1);
             var img = go.AddComponent<Image>();
             img.color = Separator;
+        }
+
+        // ── Input Field ─────────────────────────────────────────
+
+        /// <summary>Create a labeled input field row.</summary>
+        public static (InputField field, Text label) CreateInputFieldRow(
+            Transform parent, string name, string labelText, string placeholder, Vector2 rowSize)
+        {
+            var row = new GameObject(name + "Row");
+            row.transform.SetParent(parent, false);
+            var rowRT = row.AddComponent<RectTransform>();
+            rowRT.sizeDelta = rowSize;
+            var hLayout = row.AddComponent<HorizontalLayoutGroup>();
+            hLayout.spacing = 6;
+            hLayout.childAlignment = TextAnchor.MiddleLeft;
+            hLayout.childControlWidth = true;
+            hLayout.childControlHeight = true;
+            hLayout.childForceExpandWidth = true;
+            hLayout.childForceExpandHeight = false;
+
+            // Label (40% width)
+            var lbl = CreateText(row.transform, name + "Label", labelText, 12, TextAnchor.MiddleLeft);
+            var lblLE = lbl.gameObject.AddComponent<LayoutElement>();
+            lblLE.flexibleWidth = 0.4f;
+
+            // Input field background
+            var fieldGO = new GameObject(name + "Field");
+            fieldGO.transform.SetParent(row.transform, false);
+            var fieldRT = fieldGO.AddComponent<RectTransform>();
+            fieldRT.sizeDelta = new Vector2(0, rowSize.y);
+            var fieldLE = fieldGO.AddComponent<LayoutElement>();
+            fieldLE.flexibleWidth = 0.6f;
+            var bg = fieldGO.AddComponent<Image>();
+            bg.color = SliderBg;
+
+            // Text child
+            var textGO = new GameObject("Text");
+            textGO.transform.SetParent(fieldGO.transform, false);
+            var textRT = textGO.AddComponent<RectTransform>();
+            textRT.anchorMin = Vector2.zero;
+            textRT.anchorMax = Vector2.one;
+            textRT.offsetMin = new Vector2(4, 0);
+            textRT.offsetMax = new Vector2(-4, 0);
+            var textComp = textGO.AddComponent<Text>();
+            textComp.font = DefaultFont;
+            textComp.fontSize = 12;
+            textComp.color = TextColor;
+            textComp.alignment = TextAnchor.MiddleLeft;
+
+            // Placeholder child
+            var phGO = new GameObject("Placeholder");
+            phGO.transform.SetParent(fieldGO.transform, false);
+            var phRT = phGO.AddComponent<RectTransform>();
+            phRT.anchorMin = Vector2.zero;
+            phRT.anchorMax = Vector2.one;
+            phRT.offsetMin = new Vector2(4, 0);
+            phRT.offsetMax = new Vector2(-4, 0);
+            var phText = phGO.AddComponent<Text>();
+            phText.font = DefaultFont;
+            phText.fontSize = 12;
+            phText.color = new Color(TextColor.r, TextColor.g, TextColor.b, 0.4f);
+            phText.alignment = TextAnchor.MiddleLeft;
+            phText.fontStyle = FontStyle.Italic;
+            phText.text = placeholder;
+
+            var inputField = fieldGO.AddComponent<InputField>();
+            inputField.textComponent = textComp;
+            inputField.placeholder = phText;
+
+            return (inputField, lbl);
         }
 
         // ── Scroll View ─────────────────────────────────────────

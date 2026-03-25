@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine;
 
@@ -36,7 +37,15 @@ namespace Annabeth.Core
         [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
         [DllImport("user32.dll")] static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
 
+        // Feature #22: Multi-monitor adjacency
+        [DllImport("user32.dll")] static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr lprcClip, MonitorEnumProc lpfnEnum, IntPtr dwData);
+        delegate bool MonitorEnumProc(IntPtr hMonitor, IntPtr hdcMonitor, ref RECT lprcMonitor, IntPtr dwData);
+
         const uint MONITOR_DEFAULTTOPRIMARY = 1;
+
+        // Feature #22: Cached monitor rectangles
+        private readonly List<RECT> _monitorRects = new();
+        private bool _leftEdgeBlocked, _rightEdgeBlocked;
 #endif
 
         [Header("Walk Settings")]
@@ -78,6 +87,10 @@ namespace Annabeth.Core
             RefreshMonitorBounds();
             _decisionTimer = decisionInterval;
             _initialized = true;
+
+            // Feature #22: Detect which edges have adjacent monitors
+            RefreshMonitorAdjacency();
+
             Debug.Log($"[DesktopLocomotion] Initialized. Work area: ({_workArea.Left},{_workArea.Top})-({_workArea.Right},{_workArea.Bottom})");
         }
 
@@ -105,6 +118,44 @@ namespace Annabeth.Core
             var mi = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
             if (GetMonitorInfo(hMon, ref mi))
                 _workArea = mi.rcWork;
+        }
+
+        /// <summary>Feature #22: Detect adjacent monitors to block hide on those edges.</summary>
+        private void RefreshMonitorAdjacency()
+        {
+            _monitorRects.Clear();
+            EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr hMon, IntPtr _, ref RECT rect, IntPtr __) =>
+            {
+                _monitorRects.Add(rect);
+                return true;
+            }, IntPtr.Zero);
+
+            const int tolerance = 6;
+            const int minOverlap = 32;
+            _leftEdgeBlocked = false;
+            _rightEdgeBlocked = false;
+
+            foreach (var m in _monitorRects)
+            {
+                // Skip our own monitor
+                if (m.Left == _workArea.Left && m.Right == _workArea.Right) continue;
+
+                // Check vertical overlap
+                int overlapTop = Math.Max(m.Top, _workArea.Top);
+                int overlapBot = Math.Min(m.Bottom, _workArea.Bottom);
+                int vOverlap = overlapBot - overlapTop;
+                if (vOverlap < minOverlap) continue;
+
+                // Left edge adjacency: another monitor's right edge touches our left
+                if (Math.Abs(m.Right - _workArea.Left) <= tolerance)
+                    _leftEdgeBlocked = true;
+
+                // Right edge adjacency: another monitor's left edge touches our right
+                if (Math.Abs(m.Left - _workArea.Right) <= tolerance)
+                    _rightEdgeBlocked = true;
+            }
+
+            Debug.Log($"[DesktopLocomotion] Monitor adjacency: leftBlocked={_leftEdgeBlocked}, rightBlocked={_rightEdgeBlocked}");
         }
 
         private void DecideWalk()
@@ -170,18 +221,28 @@ namespace Annabeth.Core
             int distLeft = r.Left - _workArea.Left;
             int distRight = _workArea.Right - r.Right;
 
-            if (distLeft <= distRight)
+            // Feature #22: Skip edges with adjacent monitors
+            bool canLeft = !_leftEdgeBlocked;
+            bool canRight = !_rightEdgeBlocked;
+
+            if (!canLeft && !canRight) return; // Both edges blocked
+
+            if (distLeft <= distRight && canLeft)
             {
-                // Hide to left edge
                 _walkDirection = -1;
                 _remainingPixels = distLeft + w - peekVisiblePixels;
             }
-            else
+            else if (canRight)
             {
-                // Hide to right edge
                 _walkDirection = 1;
                 _remainingPixels = distRight + w - peekVisiblePixels;
             }
+            else if (canLeft)
+            {
+                _walkDirection = -1;
+                _remainingPixels = distLeft + w - peekVisiblePixels;
+            }
+            else return;
 
             if (_remainingPixels > 0)
             {

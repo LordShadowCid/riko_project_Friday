@@ -46,7 +46,7 @@ def run_test(label, code):
 log("#" * 60)
 log("#  ANNABETH UNITY DEEP INTEGRATION TEST")
 log(f"#  {time.strftime('%Y-%m-%d %H:%M:%S')}")
-log("#  Phases 1-8")
+log("#  Phases 1-8 + Feature Gap (24 features)")
 log("#" * 60)
 
 
@@ -65,7 +65,7 @@ public class Script { public static string Main() {
 }}""")
 if r and r.startswith("OK:"):
     count = int(r.split(":")[1])
-    if count >= 52:
+    if count >= 62:
         PASS("Assembly-CSharp loaded", f"{count} Annabeth types")
     else:
         FAIL("Type count low", f"Expected >=52, got {count}")
@@ -96,6 +96,10 @@ expected_types = [
     "VrmModelLibrary", "VrmFilePicker",
     # Phase 8: Desktop Interaction
     "DesktopLocomotionController",
+    # Feature Gap: New types
+    "WalkAnimationController", "DragPoseController", "PetDetectionController",
+    "OccluderQuadManager", "DesktopAmbientProbe", "AlarmTimerManager",
+    "CustomDanceLoader", "DancePlayerPanel", "DanceBlendshapeForwarder", "VmdPlayer",
 ]
 
 r = run_test("Type check", r"""
@@ -379,6 +383,119 @@ if r and r != "NO_HM":
                 PASS(f"HotkeyManager.{k} wired")
             else:
                 FAIL(f"HotkeyManager.{k}", "not wired")
+
+
+# ── TEST 8b: Feature Gap Types & API Validation ──────────────
+section("TEST 8b: Feature Gap New Types & APIs")
+
+r = run_test("Feature Gap APIs", r"""
+using System;
+using System.Linq;
+using System.Reflection;
+using System.Text;
+public class Script { public static string Main() {
+    var asm = AppDomain.CurrentDomain.GetAssemblies()
+        .FirstOrDefault(a => a.GetName().Name == "Assembly-CSharp");
+    if (asm == null) return "NO_ASM";
+    var sb = new StringBuilder();
+
+    // WalkAnimationController - Feature #3
+    var wac = asm.GetType("Annabeth.Avatar.WalkAnimationController");
+    sb.AppendLine($"WalkAnimationController:{(wac != null ? "OK" : "MISS")}");
+    if (wac != null) {
+        sb.AppendLine($"WAC.SetBlendActive:{(wac.GetMethod("SetBlendActive") != null ? "OK" : "MISS")}");
+        sb.AppendLine($"WAC.SetBlendWeight:{(wac.GetMethod("SetBlendWeight") != null ? "OK" : "MISS")}");
+    }
+
+    // DragPoseController - Feature #4
+    var dpc = asm.GetType("Annabeth.Avatar.DragPoseController");
+    sb.AppendLine($"DragPoseController:{(dpc != null ? "OK" : "MISS")}");
+
+    // PetDetectionController - Feature #11
+    var pdc = asm.GetType("Annabeth.Interaction.PetDetectionController");
+    sb.AppendLine($"PetDetectionController:{(pdc != null ? "OK" : "MISS")}");
+    if (pdc != null) {
+        sb.AppendLine($"PDC.OnPetDetected:{(pdc.GetEvent("OnPetDetected") != null ? "OK" : "MISS")}");
+    }
+
+    // OccluderQuadManager - Feature #1
+    var oqm = asm.GetType("Annabeth.Core.OccluderQuadManager");
+    sb.AppendLine($"OccluderQuadManager:{(oqm != null ? "OK" : "MISS")}");
+    if (oqm != null) {
+        sb.AppendLine($"OQM.SetEnabled:{(oqm.GetMethod("SetEnabled") != null ? "OK" : "MISS")}");
+    }
+
+    // DesktopAmbientProbe - Feature #9
+    var dap = asm.GetType("Annabeth.Core.DesktopAmbientProbe");
+    sb.AppendLine($"DesktopAmbientProbe:{(dap != null ? "OK" : "MISS")}");
+    if (dap != null) {
+        sb.AppendLine($"DAP.SetEnabled:{(dap.GetMethod("SetEnabled") != null ? "OK" : "MISS")}");
+        sb.AppendLine($"DAP.SetIntensity:{(dap.GetMethod("SetIntensity") != null ? "OK" : "MISS")}");
+    }
+
+    // AlarmTimerManager - Feature #15
+    var atm = asm.GetType("Annabeth.Core.AlarmTimerManager");
+    sb.AppendLine($"AlarmTimerManager:{(atm != null ? "OK" : "MISS")}");
+    if (atm != null) {
+        sb.AppendLine($"ATM.AddTimer:{(atm.GetMethod("AddTimer") != null ? "OK" : "MISS")}");
+        sb.AppendLine($"ATM.OnTimerFired:{(atm.GetEvent("OnTimerFired") != null ? "OK" : "MISS")}");
+    }
+
+    // CustomDanceLoader - Feature #16
+    var cdl = asm.GetType("Annabeth.Dance.CustomDanceLoader");
+    sb.AppendLine($"CustomDanceLoader:{(cdl != null ? "OK" : "MISS")}");
+    if (cdl != null) {
+        sb.AppendLine($"CDL.PlayDance:{(cdl.GetMethod("PlayDance") != null ? "OK" : "MISS")}");
+        sb.AppendLine($"CDL.Stop:{(cdl.GetMethod("Stop") != null ? "OK" : "MISS")}");
+        sb.AppendLine($"CDL.OnDanceStarted:{(cdl.GetEvent("OnDanceStarted") != null ? "OK" : "MISS")}");
+    }
+
+    // DancePlayerPanel - Feature #17
+    var dpp = asm.GetType("Annabeth.UI.DancePlayerPanel");
+    sb.AppendLine($"DancePlayerPanel:{(dpp != null ? "OK" : "MISS")}");
+
+    // DanceBlendshapeForwarder - Feature #18
+    var dbf = asm.GetType("Annabeth.Dance.DanceBlendshapeForwarder");
+    sb.AppendLine($"DanceBlendshapeForwarder:{(dbf != null ? "OK" : "MISS")}");
+    if (dbf != null) {
+        sb.AppendLine($"DBF.Setup:{(dbf.GetMethod("Setup") != null ? "OK" : "MISS")}");
+    }
+
+    // VmdPlayer - Feature #19
+    var vmd = asm.GetType("Annabeth.Dance.VmdPlayer");
+    sb.AppendLine($"VmdPlayer:{(vmd != null ? "OK" : "MISS")}");
+    if (vmd != null) {
+        sb.AppendLine($"VMD.LoadAndPlay:{(vmd.GetMethod("LoadAndPlay") != null ? "OK" : "MISS")}");
+        sb.AppendLine($"VMD.Stop:{(vmd.GetMethod("Stop") != null ? "OK" : "MISS")}");
+    }
+
+    // WindowSnapper.SittingOnWindowHandle property - Feature #1 wiring
+    var ws = asm.GetType("Annabeth.Core.WindowSnapper");
+    if (ws != null) {
+        sb.AppendLine($"WS.SittingOnWindowHandle:{(ws.GetProperty("SittingOnWindowHandle") != null ? "OK" : "MISS")}");
+        sb.AppendLine($"WS.NotifyDragStart:{(ws.GetMethod("NotifyDragStart") != null ? "OK" : "MISS")}");
+        sb.AppendLine($"WS.NotifyDragEnd:{(ws.GetMethod("NotifyDragEnd") != null ? "OK" : "MISS")}");
+    }
+
+    // TransparentWindowController opacity hit test - Feature #20
+    var twc = asm.GetType("Annabeth.Core.TransparentWindowController");
+    if (twc != null) {
+        var opField = twc.GetField("useOpacityHitTest", BindingFlags.Instance | BindingFlags.NonPublic);
+        sb.AppendLine($"TWC.useOpacityHitTest:{(opField != null ? "OK" : "MISS")}");
+    }
+
+    return sb.ToString();
+}}""")
+if r and r != "NO_ASM":
+    for line in r.strip().split("\n"):
+        if ":" in line:
+            name, val = line.rsplit(":", 1)
+            if val.strip() == "OK":
+                PASS(f"FG: {name.strip()}")
+            else:
+                FAIL(f"FG: {name.strip()}", "MISSING")
+else:
+    FAIL("Feature Gap API check", r)
 
 
 # ── TEST 9: Play Mode Test ───────────────────────────────────

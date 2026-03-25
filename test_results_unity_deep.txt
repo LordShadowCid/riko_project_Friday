@@ -1,13 +1,13 @@
 ############################################################
 #  ANNABETH UNITY DEEP INTEGRATION TEST
-#  2026-03-24 20:02:04
-#  Phases 1-8
+#  2026-03-24 23:39:53
+#  Phases 1-8 + Feature Gap (24 features)
 ############################################################
 
 ============================================================
   TEST 1: Assembly & Compilation
 ============================================================
-  [PASS] Assembly-CSharp loaded -- 52 Annabeth types
+  [PASS] Assembly-CSharp loaded -- 71 Annabeth types
 
 ============================================================
   TEST 2: Required Types Present
@@ -44,6 +44,16 @@
   [PASS] Type: VrmModelLibrary
   [PASS] Type: VrmFilePicker
   [PASS] Type: DesktopLocomotionController
+  [PASS] Type: WalkAnimationController
+  [PASS] Type: DragPoseController
+  [PASS] Type: PetDetectionController
+  [PASS] Type: OccluderQuadManager
+  [PASS] Type: DesktopAmbientProbe
+  [PASS] Type: AlarmTimerManager
+  [PASS] Type: CustomDanceLoader
+  [PASS] Type: DancePlayerPanel
+  [PASS] Type: DanceBlendshapeForwarder
+  [PASS] Type: VmdPlayer
 
 ============================================================
   TEST 3: Scene Component Presence
@@ -137,6 +147,38 @@
   [PASS] HotkeyManager.windowSnapper wired
 
 ============================================================
+  TEST 8b: Feature Gap New Types & APIs
+============================================================
+  [PASS] FG: WalkAnimationController
+  [PASS] FG: WAC.SetBlendActive
+  [PASS] FG: WAC.SetBlendWeight
+  [PASS] FG: DragPoseController
+  [PASS] FG: PetDetectionController
+  [PASS] FG: PDC.OnPetDetected
+  [PASS] FG: OccluderQuadManager
+  [PASS] FG: OQM.SetEnabled
+  [PASS] FG: DesktopAmbientProbe
+  [PASS] FG: DAP.SetEnabled
+  [PASS] FG: DAP.SetIntensity
+  [PASS] FG: AlarmTimerManager
+  [PASS] FG: ATM.AddTimer
+  [PASS] FG: ATM.OnTimerFired
+  [PASS] FG: CustomDanceLoader
+  [PASS] FG: CDL.PlayDance
+  [PASS] FG: CDL.Stop
+  [PASS] FG: CDL.OnDanceStarted
+  [PASS] FG: DancePlayerPanel
+  [PASS] FG: DanceBlendshapeForwarder
+  [PASS] FG: DBF.Setup
+  [PASS] FG: VmdPlayer
+  [PASS] FG: VMD.LoadAndPlay
+  [PASS] FG: VMD.Stop
+  [PASS] FG: WS.SittingOnWindowHandle
+  [PASS] FG: WS.NotifyDragStart
+  [PASS] FG: WS.NotifyDragEnd
+  [PASS] FG: TWC.useOpacityHitTest
+
+============================================================
   TEST 9: Play Mode Smoke Test
 ============================================================
   [PASS] Console log cleared
@@ -191,6 +233,6 @@
 ============================================================
   SUMMARY
 ============================================================
-  PASSED: 134/135
-  FAILED: 1/135
+  PASSED: 172/173
+  FAILED: 1/173
   >>> 1 FAILURE(S) <<<

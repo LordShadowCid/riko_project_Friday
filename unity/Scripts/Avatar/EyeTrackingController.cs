@@ -5,6 +5,17 @@ using UniVRM10;
 namespace Annabeth.Avatar
 {
     /// <summary>
+    /// Tracking modes for state-aware tracking permissions (Feature #10).
+    /// </summary>
+    public enum TrackingMode
+    {
+        Normal,     // Full tracking — idle, active
+        Reduced,    // Reduced speed — dancing (eyes follow beat, not cursor)
+        Disabled,   // No tracking — sleeping
+        LookUp      // Look toward cursor above — being dragged
+    }
+
+    /// <summary>
     /// Controls eye, head, and upper body tracking to follow the mouse cursor.
     /// Uses VRM LookAt for eyes/head, and cascading spine rotation for body.
     /// Mate Engine-style per-component track speeds: eyes lead, head follows, body last.
@@ -51,6 +62,10 @@ namespace Annabeth.Avatar
         private Vector3 _headLookAt;  // Medium — unused directly but kept for head speed
         private float _currentBodyYaw;
         private float _currentBodyPitch;
+
+        // Feature #10: State-aware tracking
+        private TrackingMode _trackingMode = TrackingMode.Normal;
+        private float _savedEyeSpeed, _savedHeadSpeed, _savedBodySpeed, _savedSpineBlend;
 
         public void Initialize(Vrm10Instance vrm)
         {
@@ -209,6 +224,64 @@ namespace Annabeth.Avatar
         public void SetHeadSpeed(float speed) => headSpeed = speed;
         public void SetBodySpeed(float speed) => bodySpeed = speed;
         public void SetSpineBlend(float blend) => spineBlend = blend;
+
+        /// <summary>Current tracking mode.</summary>
+        public TrackingMode CurrentTrackingMode => _trackingMode;
+
+        /// <summary>
+        /// Feature #10: State-aware tracking permissions.
+        /// Adjusts tracking behavior based on companion state.
+        /// </summary>
+        public void SetTrackingMode(TrackingMode mode)
+        {
+            if (_trackingMode == mode) return;
+
+            // Restore saved speeds when leaving a modified mode
+            if (_trackingMode != TrackingMode.Normal)
+            {
+                eyeSpeed = _savedEyeSpeed;
+                headSpeed = _savedHeadSpeed;
+                bodySpeed = _savedBodySpeed;
+                spineBlend = _savedSpineBlend;
+            }
+
+            // Save current speeds before modification
+            if (mode != TrackingMode.Normal && _trackingMode == TrackingMode.Normal)
+            {
+                _savedEyeSpeed = eyeSpeed;
+                _savedHeadSpeed = headSpeed;
+                _savedBodySpeed = bodySpeed;
+                _savedSpineBlend = spineBlend;
+            }
+
+            _trackingMode = mode;
+
+            switch (mode)
+            {
+                case TrackingMode.Normal:
+                    enableEyeTracking = true;
+                    break;
+                case TrackingMode.Reduced:
+                    enableEyeTracking = true;
+                    eyeSpeed *= 0.3f;
+                    headSpeed *= 0.2f;
+                    bodySpeed = 0f;
+                    spineBlend = 0f;
+                    break;
+                case TrackingMode.Disabled:
+                    enableEyeTracking = false;
+                    break;
+                case TrackingMode.LookUp:
+                    enableEyeTracking = true;
+                    eyeSpeed = 12f;
+                    headSpeed = 6f;
+                    bodySpeed = 0f;
+                    spineBlend = 0f;
+                    break;
+            }
+
+            Debug.Log($"[EyeTracking] Tracking mode: {mode}");
+        }
 
         private void OnDestroy()
         {

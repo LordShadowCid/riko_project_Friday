@@ -392,6 +392,27 @@ namespace Annabeth.Avatar
             OnCloseRequested?.Invoke();
         }
 
+        /// <summary>
+        /// Feature #14: Get display info string ("ModelName by Author") for the currently loaded model.
+        /// </summary>
+        public string GetCurrentModelInfo()
+        {
+            string currentPath = Core.SettingsManager.Instance?.data.selectedModelPath ?? "";
+            foreach (var e in _entries)
+            {
+                bool isCurrent = e.isDefault
+                    ? string.IsNullOrEmpty(currentPath)
+                    : string.Equals(e.filePath, currentPath, StringComparison.OrdinalIgnoreCase);
+                if (isCurrent)
+                {
+                    if (!string.IsNullOrEmpty(e.author) && e.author != "Unknown")
+                        return $"{e.displayName} by {e.author}";
+                    return e.displayName;
+                }
+            }
+            return "Unknown Model";
+        }
+
         private void OnDestroy()
         {
             _btnAddNew?.onClick.RemoveAllListeners();
