@@ -89,6 +89,27 @@ namespace Annabeth.Core
             var sleep = FindFirstObjectByType<SleepController>();
             sleep?.ApplySettings();
 
+            // Eye / spine tracking (per-component speeds + spine blend)
+            var eye = FindFirstObjectByType<Avatar.EyeTrackingController>();
+            if (eye != null)
+            {
+                eye.SetEnabled(data.enableMouseTracking);
+                eye.SetEyeSpeed(data.eyeTrackSpeed);
+                eye.SetHeadSpeed(data.headTrackSpeed);
+                eye.SetBodySpeed(data.bodyTrackSpeed);
+                eye.SetSpineBlend(data.spineBlend);
+            }
+
+            // Sway physics (drag animation)
+            var sway = FindFirstObjectByType<Avatar.DragAnimationController>();
+            if (sway != null)
+            {
+                sway.SetSwayEnabled(data.enableSway);
+                sway.SetIntensity(data.swayIntensity);
+                sway.SetSpringFrequency(data.swaySpringFrequency);
+                sway.SetDampingRatio(data.swayDampingRatio);
+            }
+
             // Start with Windows
             ApplyStartWithWindows();
 
@@ -189,13 +210,37 @@ namespace Annabeth.Core
         /// </summary>
         private void MigrateAfterLoad()
         {
-            // Example: if (data.settingsVersion < 2) { /* migrate */ data.settingsVersion = 2; }
+            // ── Version 1 → 2: Add spine/body tracking, sway physics, dance transitions ──
+            if (data.settingsVersion < 2)
+            {
+                data.spineBlend = 0.5f;
+                data.eyeTrackSpeed = 8f;
+                data.headTrackSpeed = 4f;
+                data.bodyTrackSpeed = 2f;
+                data.enableSway = true;
+                data.swayIntensity = 1.0f;
+                data.swaySpringFrequency = 2.6f;
+                data.swayDampingRatio = 0.35f;
+                data.danceTransitionSpeed = 0.6f;
+                data.settingsVersion = 2;
+                Debug.Log("[SettingsManager] Migrated v1 → v2 (spine tracking, sway, dance transitions).");
+            }
+
+            // Range clamping (always runs)
             data.fpsLimit = Mathf.Clamp(data.fpsLimit, 15, 165);
             data.sleepTimerSeconds = Mathf.Clamp(data.sleepTimerSeconds, 30f, 360f);
             data.sfxVolume = Mathf.Clamp01(data.sfxVolume);
             data.avatarSize = Mathf.Clamp(data.avatarSize, 0.5f, 2f);
             data.eyeBlend = Mathf.Clamp01(data.eyeBlend);
             data.headBlend = Mathf.Clamp01(data.headBlend);
+            data.spineBlend = Mathf.Clamp01(data.spineBlend);
+            data.eyeTrackSpeed = Mathf.Clamp(data.eyeTrackSpeed, 1f, 20f);
+            data.headTrackSpeed = Mathf.Clamp(data.headTrackSpeed, 0.5f, 15f);
+            data.bodyTrackSpeed = Mathf.Clamp(data.bodyTrackSpeed, 0.5f, 10f);
+            data.swayIntensity = Mathf.Clamp(data.swayIntensity, 0f, 2f);
+            data.swaySpringFrequency = Mathf.Clamp(data.swaySpringFrequency, 0.5f, 10f);
+            data.swayDampingRatio = Mathf.Clamp(data.swayDampingRatio, 0.05f, 1f);
+            data.danceTransitionSpeed = Mathf.Clamp(data.danceTransitionSpeed, 0.1f, 3f);
         }
     }
 
@@ -206,8 +251,8 @@ namespace Annabeth.Core
     [Serializable]
     public class SettingsData
     {
-        // Version for migration
-        public int settingsVersion = 1;
+        // Version for migration — bump when adding new fields
+        public int settingsVersion = 2;
 
         // ── Display ─────────────────────────────────────────
         public int fpsLimit = 60;
@@ -222,6 +267,21 @@ namespace Annabeth.Core
         public bool enableMouseTracking = true;
         public float eyeBlend = 1.0f;
         public float headBlend = 0.7f;
+
+        // v2: Per-component track speeds (Mate Engine style)
+        public float spineBlend = 0.5f;          // Spine/body lean toward cursor
+        public float eyeTrackSpeed = 8f;          // Fast — eyes lead
+        public float headTrackSpeed = 4f;         // Medium — head follows
+        public float bodyTrackSpeed = 2f;         // Slow — body last
+
+        // v2: Sway physics (window drag momentum)
+        public bool enableSway = true;
+        public float swayIntensity = 1.0f;        // 0..2 multiplier
+        public float swaySpringFrequency = 2.6f;  // Hz — Mate Engine default
+        public float swayDampingRatio = 0.35f;     // Under-damped for bounce
+
+        // v2: Dance transition blend speed
+        public float danceTransitionSpeed = 0.6f; // Seconds for style crossfade
 
         // ── Interaction ─────────────────────────────────────
         public bool enableParticles = true;

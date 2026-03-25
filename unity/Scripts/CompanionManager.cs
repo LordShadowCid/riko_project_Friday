@@ -341,11 +341,11 @@ namespace Annabeth
         /// <summary>
         /// Smooth crossfade between animation controllers, with hard-switch fallback.
         /// </summary>
-        private void TransitionAnimation(IBlendableAnimation from, IBlendableAnimation to)
+        private void TransitionAnimation(IBlendableAnimation from, IBlendableAnimation to, float duration = -1f)
         {
             if (animationBlendController != null && from != null && to != null)
             {
-                animationBlendController.Crossfade(from, to);
+                animationBlendController.Crossfade(from, to, duration);
             }
             else
             {
@@ -391,29 +391,58 @@ namespace Annabeth
 
         private void HandleDanceStyleChange(DanceStyle style)
         {
+            var previousStyle = currentDanceStyle;
             currentDanceStyle = style;
+
+            // Read transition duration from settings
+            float transitionDuration = 0.6f;
+            if (Core.SettingsManager.Instance != null)
+                transitionDuration = Core.SettingsManager.Instance.data.danceTransitionSpeed;
 
             if (currentMode == CompanionMode.Dance)
             {
                 switch (style)
                 {
                     case DanceStyle.None:
-                        beatDanceController?.StopDancing();
-                        vrmaAnimationController?.Stop();
+                        // Crossfade out of whatever is playing → idle
+                        if (previousStyle == DanceStyle.Procedural)
+                            TransitionAnimation(beatDanceController, idleAnimationController, transitionDuration);
+                        else
+                        {
+                            vrmaAnimationController?.Stop();
+                            idleAnimationController?.SetBlendActive(true);
+                            idleAnimationController?.SetBlendWeight(1f);
+                        }
                         break;
 
                     case DanceStyle.Procedural:
                         vrmaAnimationController?.Stop();
                         beatDanceController?.StartDancing();
-                        TransitionAnimation(idleAnimationController, beatDanceController);
+                        // Smooth crossfade: if coming from idle or None, blend in
+                        if (previousStyle == DanceStyle.None || previousStyle == DanceStyle.Procedural)
+                            TransitionAnimation(idleAnimationController, beatDanceController, transitionDuration);
+                        else
+                        {
+                            // From VRMA → procedural: just blend from idle since VRMA already stopped
+                            TransitionAnimation(idleAnimationController, beatDanceController, transitionDuration);
+                        }
                         break;
 
                     case DanceStyle.ShikanokoDance:
-                        beatDanceController?.StopDancing();
-                        if (animationBlendController != null)
+                        // Crossfade out of procedural dance if active
+                        if (previousStyle == DanceStyle.Procedural && beatDanceController != null)
                         {
-                            beatDanceController?.SetBlendActive(false);
-                            beatDanceController?.SetBlendWeight(0f);
+                            TransitionAnimation(beatDanceController, idleAnimationController, transitionDuration);
+                            // After blend completes, idle will be at 1.0 — VRMA takes over bones directly
+                        }
+                        else
+                        {
+                            beatDanceController?.StopDancing();
+                            if (animationBlendController != null)
+                            {
+                                beatDanceController?.SetBlendActive(false);
+                                beatDanceController?.SetBlendWeight(0f);
+                            }
                         }
                         _vrmaAudioPaused = true; // Start paused until music detected
                         _ = PlayVrmaAnimation("shikanoko_dance.vrma");
@@ -421,7 +450,7 @@ namespace Annabeth
                 }
             }
 
-            Debug.Log($"[CompanionManager] Dance style: {style}");
+            Debug.Log($"[CompanionManager] Dance style: {previousStyle} → {style}");
         }
 
         // ── Public Methods ──────────────────────────────────────────

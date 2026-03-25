@@ -25,6 +25,23 @@ namespace Annabeth.UI
         private Text _labelEyeBlend;
         private Slider _sliderHeadBlend;
         private Text _labelHeadBlend;
+        private Slider _sliderSpineBlend;
+        private Text _labelSpineBlend;
+        private Slider _sliderEyeTrackSpeed;
+        private Text _labelEyeTrackSpeed;
+        private Slider _sliderHeadTrackSpeed;
+        private Text _labelHeadTrackSpeed;
+        private Slider _sliderBodyTrackSpeed;
+        private Text _labelBodyTrackSpeed;
+
+        // Sway
+        private Toggle _toggleSway;
+        private Slider _sliderSwayIntensity;
+        private Text _labelSwayIntensity;
+
+        // Dance
+        private Slider _sliderDanceTransition;
+        private Text _labelDanceTransition;
 
         // Interaction
         private Toggle _toggleParticles;
@@ -101,6 +118,23 @@ namespace Annabeth.UI
             _toggleMouseTracking = UIFactory.CreateToggle(content, "MouseTracking", "Mouse Tracking", toggleSize);
             (_sliderEyeBlend, _labelEyeBlend) = UIFactory.CreateSliderRow(content, "EyeBlend", "Eye Blend", 0f, 1f, false, rowSize);
             (_sliderHeadBlend, _labelHeadBlend) = UIFactory.CreateSliderRow(content, "HeadBlend", "Head Blend", 0f, 1f, false, rowSize);
+            (_sliderSpineBlend, _labelSpineBlend) = UIFactory.CreateSliderRow(content, "SpineBlend", "Spine Blend", 0f, 1f, false, rowSize);
+            (_sliderEyeTrackSpeed, _labelEyeTrackSpeed) = UIFactory.CreateSliderRow(content, "EyeSpeed", "Eye Track Speed", 1f, 20f, false, rowSize);
+            (_sliderHeadTrackSpeed, _labelHeadTrackSpeed) = UIFactory.CreateSliderRow(content, "HeadSpeed", "Head Track Speed", 0.5f, 15f, false, rowSize);
+            (_sliderBodyTrackSpeed, _labelBodyTrackSpeed) = UIFactory.CreateSliderRow(content, "BodySpeed", "Body Track Speed", 0.5f, 10f, false, rowSize);
+
+            UIFactory.CreateSeparator(content, rowSize.x);
+
+            // ── Sway Physics ────────
+            UIFactory.CreateSectionHeader(content, "Sway Physics", rowSize);
+            _toggleSway = UIFactory.CreateToggle(content, "Sway", "Enable Sway", toggleSize);
+            (_sliderSwayIntensity, _labelSwayIntensity) = UIFactory.CreateSliderRow(content, "SwayIntensity", "Sway Intensity", 0f, 2f, false, rowSize);
+
+            UIFactory.CreateSeparator(content, rowSize.x);
+
+            // ── Dance ───────────────
+            UIFactory.CreateSectionHeader(content, "Dance", rowSize);
+            (_sliderDanceTransition, _labelDanceTransition) = UIFactory.CreateSliderRow(content, "DanceTrans", "Dance Transition", 0.1f, 3f, false, rowSize);
 
             UIFactory.CreateSeparator(content, rowSize.x);
 
@@ -145,6 +179,15 @@ namespace Annabeth.UI
             _toggleMouseTracking?.onValueChanged.AddListener(OnMouseTrackingChanged);
             _sliderEyeBlend?.onValueChanged.AddListener(OnEyeBlendChanged);
             _sliderHeadBlend?.onValueChanged.AddListener(OnHeadBlendChanged);
+            _sliderSpineBlend?.onValueChanged.AddListener(OnSpineBlendChanged);
+            _sliderEyeTrackSpeed?.onValueChanged.AddListener(OnEyeTrackSpeedChanged);
+            _sliderHeadTrackSpeed?.onValueChanged.AddListener(OnHeadTrackSpeedChanged);
+            _sliderBodyTrackSpeed?.onValueChanged.AddListener(OnBodyTrackSpeedChanged);
+
+            _toggleSway?.onValueChanged.AddListener(OnSwayChanged);
+            _sliderSwayIntensity?.onValueChanged.AddListener(OnSwayIntensityChanged);
+
+            _sliderDanceTransition?.onValueChanged.AddListener(OnDanceTransitionChanged);
 
             _toggleParticles?.onValueChanged.AddListener(OnParticlesChanged);
             _toggleTouchSounds?.onValueChanged.AddListener(OnTouchSoundsChanged);
@@ -171,6 +214,15 @@ namespace Annabeth.UI
             _toggleMouseTracking?.onValueChanged.RemoveListener(OnMouseTrackingChanged);
             _sliderEyeBlend?.onValueChanged.RemoveListener(OnEyeBlendChanged);
             _sliderHeadBlend?.onValueChanged.RemoveListener(OnHeadBlendChanged);
+            _sliderSpineBlend?.onValueChanged.RemoveListener(OnSpineBlendChanged);
+            _sliderEyeTrackSpeed?.onValueChanged.RemoveListener(OnEyeTrackSpeedChanged);
+            _sliderHeadTrackSpeed?.onValueChanged.RemoveListener(OnHeadTrackSpeedChanged);
+            _sliderBodyTrackSpeed?.onValueChanged.RemoveListener(OnBodyTrackSpeedChanged);
+
+            _toggleSway?.onValueChanged.RemoveListener(OnSwayChanged);
+            _sliderSwayIntensity?.onValueChanged.RemoveListener(OnSwayIntensityChanged);
+
+            _sliderDanceTransition?.onValueChanged.RemoveListener(OnDanceTransitionChanged);
 
             _toggleParticles?.onValueChanged.RemoveListener(OnParticlesChanged);
             _toggleTouchSounds?.onValueChanged.RemoveListener(OnTouchSoundsChanged);
@@ -211,6 +263,23 @@ namespace Annabeth.UI
             UpdateLabel(_labelEyeBlend, $"{d.eyeBlend:P0}");
             _sliderHeadBlend?.SetValueWithoutNotify(d.headBlend);
             UpdateLabel(_labelHeadBlend, $"{d.headBlend:P0}");
+            _sliderSpineBlend?.SetValueWithoutNotify(d.spineBlend);
+            UpdateLabel(_labelSpineBlend, $"{d.spineBlend:P0}");
+            _sliderEyeTrackSpeed?.SetValueWithoutNotify(d.eyeTrackSpeed);
+            UpdateLabel(_labelEyeTrackSpeed, $"{d.eyeTrackSpeed:F1}");
+            _sliderHeadTrackSpeed?.SetValueWithoutNotify(d.headTrackSpeed);
+            UpdateLabel(_labelHeadTrackSpeed, $"{d.headTrackSpeed:F1}");
+            _sliderBodyTrackSpeed?.SetValueWithoutNotify(d.bodyTrackSpeed);
+            UpdateLabel(_labelBodyTrackSpeed, $"{d.bodyTrackSpeed:F1}");
+
+            // Sway
+            _toggleSway?.SetIsOnWithoutNotify(d.enableSway);
+            _sliderSwayIntensity?.SetValueWithoutNotify(d.swayIntensity);
+            UpdateLabel(_labelSwayIntensity, $"{d.swayIntensity:F1}x");
+
+            // Dance
+            _sliderDanceTransition?.SetValueWithoutNotify(d.danceTransitionSpeed);
+            UpdateLabel(_labelDanceTransition, $"{d.danceTransitionSpeed:F1}s");
 
             // Interaction
             _toggleParticles?.SetIsOnWithoutNotify(d.enableParticles);
@@ -278,6 +347,61 @@ namespace Annabeth.UI
             if (_loading) return;
             Data.headBlend = val;
             UpdateLabel(_labelHeadBlend, $"{val:P0}");
+            SaveAndApply();
+        }
+
+        private void OnSpineBlendChanged(float val)
+        {
+            if (_loading) return;
+            Data.spineBlend = val;
+            UpdateLabel(_labelSpineBlend, $"{val:P0}");
+            SaveAndApply();
+        }
+
+        private void OnEyeTrackSpeedChanged(float val)
+        {
+            if (_loading) return;
+            Data.eyeTrackSpeed = val;
+            UpdateLabel(_labelEyeTrackSpeed, $"{val:F1}");
+            SaveAndApply();
+        }
+
+        private void OnHeadTrackSpeedChanged(float val)
+        {
+            if (_loading) return;
+            Data.headTrackSpeed = val;
+            UpdateLabel(_labelHeadTrackSpeed, $"{val:F1}");
+            SaveAndApply();
+        }
+
+        private void OnBodyTrackSpeedChanged(float val)
+        {
+            if (_loading) return;
+            Data.bodyTrackSpeed = val;
+            UpdateLabel(_labelBodyTrackSpeed, $"{val:F1}");
+            SaveAndApply();
+        }
+
+        private void OnSwayChanged(bool val)
+        {
+            if (_loading) return;
+            Data.enableSway = val;
+            SaveAndApply();
+        }
+
+        private void OnSwayIntensityChanged(float val)
+        {
+            if (_loading) return;
+            Data.swayIntensity = val;
+            UpdateLabel(_labelSwayIntensity, $"{val:F1}x");
+            SaveAndApply();
+        }
+
+        private void OnDanceTransitionChanged(float val)
+        {
+            if (_loading) return;
+            Data.danceTransitionSpeed = val;
+            UpdateLabel(_labelDanceTransition, $"{val:F1}s");
             SaveAndApply();
         }
 

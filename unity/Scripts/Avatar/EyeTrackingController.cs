@@ -5,17 +5,29 @@ using UniVRM10;
 namespace Annabeth.Avatar
 {
     /// <summary>
-    /// Controls eye tracking to follow the mouse cursor.
-    /// Uses VRM LookAt system for natural eye movement.
+    /// Controls eye, head, and upper body tracking to follow the mouse cursor.
+    /// Uses VRM LookAt for eyes/head, and cascading spine rotation for body.
+    /// Mate Engine-style per-component track speeds: eyes lead, head follows, body last.
     /// </summary>
     public class EyeTrackingController : MonoBehaviour
     {
         [Header("Eye Tracking Settings")]
         [SerializeField] private bool enableEyeTracking = true;
-        [SerializeField] private float lookAtSpeed = 5f;
         [SerializeField] private float maxHorizontalAngle = 30f;
         [SerializeField] private float maxVerticalAngle = 20f;
         [SerializeField] private float lookAtDistance = 2f;
+
+        [Header("Per-Component Speeds (Mate Engine style)")]
+        [SerializeField] private float eyeSpeed = 8f;          // Fast — eyes lead
+        [SerializeField] private float headSpeed = 4f;          // Medium — head follows
+        [SerializeField] private float bodySpeed = 2f;          // Slow — body last
+
+        [Header("Spine/Body Tracking")]
+        [SerializeField] private float spineBlend = 0.5f;       // 0..1 blend for body lean
+        [SerializeField] private float chestMultiplier = 0.8f;   // Cascading: chest gets 80%
+        [SerializeField] private float upperChestMultiplier = 0.6f; // Upper chest gets 60%
+        [SerializeField] private float spineMaxYaw = 15f;        // Max horizontal rotation degrees
+        [SerializeField] private float spineMaxPitch = 10f;      // Max vertical rotation degrees
 
         [Header("References")]
         [SerializeField] private Camera mainCamera;
@@ -26,31 +38,52 @@ namespace Annabeth.Avatar
         private Vector3 _targetLookAt;
         private Transform _headBone;
 
+        // Spine tracking bones
+        private Transform _spine;
+        private Transform _chest;
+        private Transform _upperChest;
+        private Quaternion _origSpine;
+        private Quaternion _origChest;
+        private Quaternion _origUpperChest;
+
+        // Separate interpolation states (per-component speed)
+        private Vector3 _eyeLookAt;   // Fastest — drives VRM LookAt target
+        private Vector3 _headLookAt;  // Medium — unused directly but kept for head speed
+        private float _currentBodyYaw;
+        private float _currentBodyPitch;
+
         public void Initialize(Vrm10Instance vrm)
         {
             _vrm = vrm;
 
             if (mainCamera == null)
-            {
                 mainCamera = Camera.main;
-            }
 
-            // Cache head bone for per-frame use
             var animator = vrm?.GetComponent<Animator>();
             _headBone = animator?.GetBoneTransform(HumanBodyBones.Head);
 
-            // Create look-at target (not parented to avatar to avoid
-            // any influence from model hierarchy)
+            // Cache spine chain for body tracking
+            _spine = animator?.GetBoneTransform(HumanBodyBones.Spine);
+            _chest = animator?.GetBoneTransform(HumanBodyBones.Chest);
+            _upperChest = animator?.GetBoneTransform(HumanBodyBones.UpperChest);
+            if (_upperChest == null) _upperChest = _chest; // Fallback
+
+            if (_spine) _origSpine = _spine.localRotation;
+            if (_chest) _origChest = _chest.localRotation;
+            if (_upperChest && _upperChest != _chest) _origUpperChest = _upperChest.localRotation;
+
+            // Create look-at target (not parented to avatar)
             var targetObj = new GameObject("EyeTrackTarget");
             _lookAtTarget = targetObj.transform;
 
-            // Initialize _currentLookAt to camera position so we don't
-            // lerp from Vector3.zero (would cause initial head jerk)
+            // Initialize positions to camera to avoid initial jerk
             if (mainCamera != null)
             {
-                _currentLookAt = mainCamera.transform.position;
-                _targetLookAt = _currentLookAt;
-                _lookAtTarget.position = _currentLookAt;
+                _eyeLookAt = mainCamera.transform.position;
+                _headLookAt = _eyeLookAt;
+                _currentLookAt = _eyeLookAt;
+                _targetLookAt = _eyeLookAt;
+                _lookAtTarget.position = _eyeLookAt;
             }
 
             // Configure VRM LookAt
@@ -64,24 +97,25 @@ namespace Annabeth.Avatar
         private void Update()
         {
             if (!enableEyeTracking || _vrm == null || mainCamera == null) return;
-
             UpdateLookAtTarget();
+        }
+
+        private void LateUpdate()
+        {
+            if (!enableEyeTracking || _vrm == null || spineBlend <= 0f) return;
+            ApplySpineTracking();
         }
 
         private void UpdateLookAtTarget()
         {
             Vector3 mousePos = Mouse.current != null ? Mouse.current.position.ReadValue() : Vector3.zero;
-            
+
             float normalizedX = (mousePos.x / Screen.width - 0.5f) * 2f;
             float normalizedY = (mousePos.y / Screen.height - 0.5f) * 2f;
 
             if (_headBone == null) return;
 
             Vector3 headPos = _headBone.position;
-
-            // Use direction from head toward camera as the stable base direction.
-            // Do NOT use headBone.forward — LookAt rotates the head bone, which
-            // moves the target, creating a feedback loop (slow 360° spin).
             Vector3 toCamera = (mainCamera.transform.position - headPos).normalized;
 
             float horizontalOffset = normalizedX * Mathf.Tan(maxHorizontalAngle * Mathf.Deg2Rad) * lookAtDistance;
@@ -91,13 +125,63 @@ namespace Annabeth.Avatar
                            mainCamera.transform.right * horizontalOffset +
                            mainCamera.transform.up * verticalOffset;
 
-            _currentLookAt = Vector3.Lerp(_currentLookAt, _targetLookAt, Time.deltaTime * lookAtSpeed);
-            _lookAtTarget.position = _currentLookAt;
+            float dt = Time.deltaTime;
+
+            // Per-component speed: eyes lerp fastest (drives VRM LookAt position)
+            _eyeLookAt = Vector3.Lerp(_eyeLookAt, _targetLookAt, dt * eyeSpeed);
+            _lookAtTarget.position = _eyeLookAt;
+
+            // Head speed — the VRM LookAt system handles head rotation internally,
+            // but we control the target position with eye speed. The head naturally
+            // lags behind the eyes via VRM's built-in head/eye split.
         }
 
-        private Transform GetHeadBone()
+        /// <summary>
+        /// Cascading spine rotation toward cursor. Applied in LateUpdate so it
+        /// layers on top of idle/dance animations. Mate Engine-style cascading:
+        /// spine gets full amount, chest gets chestMultiplier, upperChest gets upperChestMultiplier.
+        /// </summary>
+        private void ApplySpineTracking()
         {
-            return _headBone;
+            if (_headBone == null || mainCamera == null) return;
+
+            var mouse = Mouse.current;
+            if (mouse == null) return;
+
+            Vector2 mousePos = mouse.position.ReadValue();
+            float nx = (mousePos.x / Screen.width) * 2f - 1f;  // -1..1
+            float ny = (mousePos.y / Screen.height) * 2f - 1f;
+
+            // Target yaw/pitch for spine chain
+            float targetYaw = nx * spineMaxYaw;
+            float targetPitch = -ny * spineMaxPitch;
+
+            float dt = Time.deltaTime;
+            _currentBodyYaw = Mathf.Lerp(_currentBodyYaw, targetYaw, dt * bodySpeed);
+            _currentBodyPitch = Mathf.Lerp(_currentBodyPitch, targetPitch, dt * bodySpeed);
+
+            float w = spineBlend;
+
+            // Apply cascading rotation — each bone gets a fraction
+            if (_spine)
+            {
+                Quaternion rot = Quaternion.Euler(_currentBodyPitch * w, _currentBodyYaw * w, 0f);
+                _spine.localRotation = _spine.localRotation * rot;
+            }
+
+            if (_chest)
+            {
+                float cm = chestMultiplier;
+                Quaternion rot = Quaternion.Euler(_currentBodyPitch * w * cm, _currentBodyYaw * w * cm, 0f);
+                _chest.localRotation = _chest.localRotation * rot;
+            }
+
+            if (_upperChest && _upperChest != _chest)
+            {
+                float ucm = upperChestMultiplier;
+                Quaternion rot = Quaternion.Euler(_currentBodyPitch * w * ucm, _currentBodyYaw * w * ucm, 0f);
+                _upperChest.localRotation = _upperChest.localRotation * rot;
+            }
         }
 
         public void SetEnabled(bool enabled)
@@ -106,8 +190,7 @@ namespace Annabeth.Avatar
 
             if (!enabled && _vrm?.Vrm.LookAt != null)
             {
-                // Reset target to in front of face using camera direction (not headBone.forward)
-                var headBone = GetHeadBone();
+                var headBone = _headBone;
                 if (headBone != null && _lookAtTarget != null && mainCamera != null)
                 {
                     Vector3 toCamera = (mainCamera.transform.position - headBone.position).normalized;
@@ -120,6 +203,12 @@ namespace Annabeth.Avatar
         {
             _targetLookAt = worldPosition;
         }
+
+        // ── Settings API ────────────────────────────────────────
+        public void SetEyeSpeed(float speed) => eyeSpeed = speed;
+        public void SetHeadSpeed(float speed) => headSpeed = speed;
+        public void SetBodySpeed(float speed) => bodySpeed = speed;
+        public void SetSpineBlend(float blend) => spineBlend = blend;
 
         private void OnDestroy()
         {

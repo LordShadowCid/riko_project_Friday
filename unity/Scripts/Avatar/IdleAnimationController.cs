@@ -22,7 +22,8 @@ namespace Annabeth.Avatar
         [SerializeField] private float headDriftAmplitudeX = 0.001f;
 
         [Header("Mouse Awareness (Body Lean)")]
-        [SerializeField] private float leanMaxAngle = 3f;
+        [Tooltip("Reduced — EyeTrackingController handles main spine tracking now")]
+        [SerializeField] private float leanMaxAngle = 1.5f;
         [SerializeField] private float leanSmoothSpeed = 2f;
 
         private Vrm10Instance _vrm;
