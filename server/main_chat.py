@@ -646,6 +646,7 @@ while True:
     conversation_recording.parent.mkdir(parents=True, exist_ok=True)
 
     output_wav_path = None
+    llm_input_override = None  # set by read-aloud stop handler
     
     # Timing diagnostics
     t_start = time.time()
@@ -718,24 +719,83 @@ while True:
         read_intent_phrases = [
             "read that", "read this", "read the selected", "read selected",
             "read it", "read aloud", "read to me", "read what i selected",
-            "read the text", "can you read", "please read"
+            "read the text", "can you read", "please read",
+            "read this for me", "read that for me", "read it for me",
+            "read what's highlighted", "read the highlighted",
+            "read my selection", "read what i highlighted",
         ]
         user_lower = user_spoken_text.lower().strip()
         is_read_intent = any(phrase in user_lower for phrase in read_intent_phrases)
-        
-        if is_read_intent:
+
+        # ----- RESUME / STOP intents while paused -----
+        resume_phrases = [
+            "keep reading", "continue reading", "go on", "resume reading",
+            "read on", "carry on", "keep going", "continue where you left off",
+        ]
+        stop_phrases = [
+            "stop reading", "that's enough", "never mind", "cancel reading",
+            "forget it", "done reading", "quit reading",
+        ]
+        is_resume_intent = any(p in user_lower for p in resume_phrases)
+        is_stop_intent   = any(p in user_lower for p in stop_phrases)
+
+        read_aloud = get_read_aloud_manager()
+
+        # Handle stop while paused or reading
+        if is_stop_intent and read_aloud.is_active:
+            read_aloud.stop()
+            print("[ReadAloud] Stopped by voice command")
+            # Let LLM respond naturally (omit the raw stop phrase)
+            llm_input_override = "The user asked me to stop reading."
+
+        # Handle resume while paused
+        elif is_resume_intent and read_aloud.state.is_paused:
+            read_aloud.resume()
+            print("[ReadAloud] Resumed by voice command")
+            continue  # process_read_aloud_queue picks it up next loop
+
+        elif is_read_intent:
             print("[ReadAloud] Detected read intent - capturing text...")
             captured_text = capture_selected_text(restore_clipboard=True)
             
             if captured_text and len(captured_text) > 5:
                 print(f"[ReadAloud] Captured {len(captured_text)} characters")
-                read_aloud = get_read_aloud_manager()
+
+                # TTS acknowledgment before reading
+                ack_text = "Sure, let me read that for you."
+                print(f"Annabeth: {ack_text}")
+                ack_path = audio_dir / f"read_ack_{uuid.uuid4().hex}.wav"
+                ack_path.parent.mkdir(parents=True, exist_ok=True)
+                ack_wav = sovits_gen(ack_text, ack_path)
+                if ack_wav:
+                    avatar_speak_start(ack_text)
+                    play_audio(ack_wav, output_device=output_device)
+                    avatar_speak_end()
+                    try:
+                        ack_path.unlink()
+                    except Exception:
+                        pass
+
                 read_aloud.state.start_reading(captured_text)
                 # Go back to top of loop to process the queue
                 continue
             else:
                 print("[ReadAloud] No text captured - make sure text is selected!")
-                # Let LLM respond about the failure
+                # Tell the user through TTS
+                fail_text = "I don't see any text selected. Try highlighting the text you want me to read first."
+                print(f"Annabeth: {fail_text}")
+                fail_path = audio_dir / f"read_fail_{uuid.uuid4().hex}.wav"
+                fail_path.parent.mkdir(parents=True, exist_ok=True)
+                fail_wav = sovits_gen(fail_text, fail_path)
+                if fail_wav:
+                    avatar_speak_start(fail_text)
+                    play_audio(fail_wav, output_device=output_device)
+                    avatar_speak_end()
+                    try:
+                        fail_path.unlink()
+                    except Exception:
+                        pass
+                continue
 
         # =====================================================================
         # CHECK FOR READ-ALOUD Q&A CONTEXT
@@ -743,7 +803,6 @@ while True:
         # If read-aloud is paused, add context about what was being read
         qa_context = ""
         try:
-            read_aloud = get_read_aloud_manager()
             if read_aloud.state.is_paused:
                 qa_context = read_aloud.get_qa_context()
                 if qa_context:
@@ -752,7 +811,8 @@ while True:
             pass
         
         # Combine Q&A context with user input if available
-        llm_input = user_spoken_text
+        llm_input = llm_input_override if llm_input_override else user_spoken_text
+        llm_input_override = None  # reset
         if qa_context:
             llm_input = f"{qa_context}\n\nThe user's question: {user_spoken_text}"
 
