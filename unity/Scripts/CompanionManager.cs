@@ -46,6 +46,10 @@ namespace Annabeth
         [Header("Phase 6: System")]
         [SerializeField] private SleepController sleepController;
 
+        [Header("Phase 8: Desktop Interaction")]
+        [SerializeField] private DesktopLocomotionController locomotionController;
+        [SerializeField] private WindowSnapper windowSnapper;
+
         [Header("State")]
         [SerializeField] private CompanionMode currentMode = CompanionMode.Idle;
         [SerializeField] private DanceStyle currentDanceStyle = DanceStyle.None;
@@ -97,6 +101,26 @@ namespace Annabeth
             // Cache Phase 6 sleep controller
             if (sleepController == null)
                 sleepController = FindFirstObjectByType<SleepController>();
+
+            // Cache Phase 8 desktop interaction controllers
+            if (locomotionController == null)
+                locomotionController = FindFirstObjectByType<DesktopLocomotionController>();
+            if (windowSnapper == null)
+                windowSnapper = FindFirstObjectByType<WindowSnapper>();
+
+            // Wire falling events for animation feedback
+            if (windowSnapper != null)
+            {
+                windowSnapper.OnSittingChanged += HandleSittingChanged;
+                windowSnapper.OnFallStarted += HandleFallStarted;
+                windowSnapper.OnFallLanded += HandleFallLanded;
+            }
+
+            // Wire walk state events
+            if (locomotionController != null)
+            {
+                locomotionController.OnWalkStateChanged += HandleWalkStateChanged;
+            }
         }
 
         private void OnDestroy()
@@ -122,6 +146,18 @@ namespace Annabeth
             {
                 windowCtrl.OnDragStart -= HandleDragStart;
                 windowCtrl.OnDragEnd -= HandleDragEnd;
+            }
+
+            if (windowSnapper != null)
+            {
+                windowSnapper.OnSittingChanged -= HandleSittingChanged;
+                windowSnapper.OnFallStarted -= HandleFallStarted;
+                windowSnapper.OnFallLanded -= HandleFallLanded;
+            }
+
+            if (locomotionController != null)
+            {
+                locomotionController.OnWalkStateChanged -= HandleWalkStateChanged;
             }
         }
 
@@ -230,6 +266,30 @@ namespace Annabeth
         {
             touchSoundHandler?.PlayTouchSound();
             particleEffectHandler?.PlayAtPosition(hitPoint, isHead);
+        }
+
+        // ── Phase 8: Desktop Interaction Handlers ────────────────────
+
+        private void HandleSittingChanged(bool sitting)
+        {
+            Debug.Log($"[CompanionManager] Sitting: {sitting}");
+        }
+
+        private void HandleFallStarted()
+        {
+            Debug.Log("[CompanionManager] Falling!");
+            emotionController?.SetEmotion("surprised");
+        }
+
+        private void HandleFallLanded()
+        {
+            Debug.Log("[CompanionManager] Landed!");
+            emotionController?.ClearEmotion();
+        }
+
+        private void HandleWalkStateChanged(bool walking)
+        {
+            Debug.Log($"[CompanionManager] Walking: {walking}");
         }
 
         private void HandleModeChange(CompanionMode mode)

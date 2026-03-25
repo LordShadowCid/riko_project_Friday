@@ -17,6 +17,8 @@ namespace Annabeth.Input
         [Header("References")]
         [SerializeField] private CompanionManager companionManager;
         [SerializeField] private MessageHandler messageHandler;
+        [SerializeField] private DesktopLocomotionController locomotionController;
+        [SerializeField] private WindowSnapper windowSnapper;
 
         [Header("Settings")]
         [SerializeField] private bool globalHotkeysEnabled = true;
@@ -29,6 +31,10 @@ namespace Annabeth.Input
                 companionManager = FindFirstObjectByType<CompanionManager>();
             if (messageHandler == null)
                 messageHandler = FindFirstObjectByType<MessageHandler>();
+            if (locomotionController == null)
+                locomotionController = FindFirstObjectByType<DesktopLocomotionController>();
+            if (windowSnapper == null)
+                windowSnapper = FindFirstObjectByType<WindowSnapper>();
         }
 
         private void Update()
@@ -138,6 +144,27 @@ namespace Annabeth.Input
             {
                 companionManager?.SetMode(CompanionMode.Idle);
                 Debug.Log("[HotkeyManager] Return to idle");
+            }
+
+            // W = Toggle random walk locomotion
+            if (kb.wKey.wasPressedThisFrame)
+            {
+                locomotionController?.ToggleEnabled();
+                Debug.Log($"[HotkeyManager] Walk toggled: {locomotionController?.IsEnabled}");
+            }
+
+            // P = Screen-edge peek
+            if (kb.pKey.wasPressedThisFrame)
+            {
+                locomotionController?.StartPeek();
+                Debug.Log("[HotkeyManager] Peek toggled");
+            }
+
+            // G = Try sit on nearest window
+            if (kb.gKey.wasPressedThisFrame)
+            {
+                windowSnapper?.TrySitOnNearestWindow();
+                Debug.Log("[HotkeyManager] Try sit on window");
             }
         }
 

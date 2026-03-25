@@ -140,7 +140,7 @@ namespace Annabeth.Interaction
             // Determine zone
             bool isHead = hitPoint.y >= _headYThreshold;
             var reactions = isHead ? HeadReactions : BodyReactions;
-            _activeReaction = reactions[Random.Range(0, reactions.Length)];
+            _activeReaction = reactions[UnityEngine.Random.Range(0, reactions.Length)];
 
             _reacting = true;
             _reactionTimer = reactionDuration;

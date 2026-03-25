@@ -1,0 +1,196 @@
+############################################################
+#  ANNABETH UNITY DEEP INTEGRATION TEST
+#  2026-03-24 20:02:04
+#  Phases 1-8
+############################################################
+
+============================================================
+  TEST 1: Assembly & Compilation
+============================================================
+  [PASS] Assembly-CSharp loaded -- 52 Annabeth types
+
+============================================================
+  TEST 2: Required Types Present
+============================================================
+  [PASS] Type: CompanionManager
+  [PASS] Type: WebSocketClient
+  [PASS] Type: MessageHandler
+  [PASS] Type: TransparentWindowController
+  [PASS] Type: AvatarController
+  [PASS] Type: FPSController
+  [PASS] Type: EmotionController
+  [PASS] Type: LipSyncController
+  [PASS] Type: EyeTrackingController
+  [PASS] Type: BlinkController
+  [PASS] Type: AnimationBlendController
+  [PASS] Type: IdleAnimationController
+  [PASS] Type: BeatDanceController
+  [PASS] Type: VrmaAnimationController
+  [PASS] Type: TouchReactionController
+  [PASS] Type: WindowSnapper
+  [PASS] Type: HotkeyManager
+  [PASS] Type: SpeechBubble
+  [PASS] Type: RadialMenu
+  [PASS] Type: DebugOverlay
+  [PASS] Type: SettingsPanel
+  [PASS] Type: UIFactory
+  [PASS] Type: DragAnimationController
+  [PASS] Type: TouchSoundHandler
+  [PASS] Type: ParticleEffectHandler
+  [PASS] Type: SleepController
+  [PASS] Type: SystemTrayController
+  [PASS] Type: SettingsManager
+  [PASS] Type: MemoryOptimizer
+  [PASS] Type: VrmModelLibrary
+  [PASS] Type: VrmFilePicker
+  [PASS] Type: DesktopLocomotionController
+
+============================================================
+  TEST 3: Scene Component Presence
+============================================================
+  [PASS] Scene: CompanionManager
+  [PASS] Scene: WebSocketClient
+  [PASS] Scene: MessageHandler
+  [PASS] Scene: TransparentWindowController
+  [PASS] Scene: AvatarController
+  [PASS] Scene: EmotionController
+  [PASS] Scene: LipSyncController
+  [PASS] Scene: EyeTrackingController
+  [PASS] Scene: BlinkController
+  [PASS] Scene: AnimationBlendController
+  [PASS] Scene: IdleAnimationController
+  [PASS] Scene: BeatDanceController
+  [PASS] Scene: VrmaAnimationController
+  [PASS] Scene: TouchReactionController
+  [PASS] Scene: WindowSnapper
+  [PASS] Scene: HotkeyManager
+  [PASS] Scene: SpeechBubble
+  [PASS] Scene: DebugOverlay
+  [PASS] Scene: DragAnimationController
+  [PASS] Scene: TouchSoundHandler
+  [PASS] Scene: ParticleEffectHandler
+  [PASS] Scene: SleepController
+  [PASS] Scene: SystemTrayController
+  [PASS] Scene: SettingsManager
+  [PASS] Scene: MemoryOptimizer
+  [PASS] Scene: FPSController
+  [PASS] Scene: DesktopLocomotionController
+
+============================================================
+  TEST 4: CompanionManager Reference Wiring
+============================================================
+  [PASS] Wired: webSocketClient
+  [PASS] Wired: messageHandler
+  [PASS] Wired: avatarController
+  [PASS] Wired: emotionController
+  [PASS] Wired: lipSyncController
+  [PASS] Wired: eyeTrackingController
+  [PASS] Wired: blinkController
+  [PASS] Wired: animationBlendController
+  [PASS] Wired: idleAnimationController
+  [PASS] Wired: beatDanceController
+  [PASS] Wired: vrmaAnimationController
+  [PASS] Wired: touchReactionController
+  [PASS] Wired: speechBubble
+  [PASS] Wired: touchSoundHandler
+  [PASS] Wired: particleEffectHandler
+  [PASS] Wired: dragAnimController
+  [PASS] Wired: sleepController
+  [PASS] Wired: locomotionController
+  [PASS] Wired: windowSnapper
+
+============================================================
+  TEST 5: Phase 8 - DesktopLocomotionController
+============================================================
+  [PASS] DesktopLocomotionController in scene
+  [PASS] DLC enabled=True
+  [PASS] DLC config minWalkDistance=250
+  [PASS] DLC config maxWalkDistance=550
+  [PASS] DLC config peekVisiblePixels=40
+
+============================================================
+  TEST 6: Phase 8 - WindowSnapper (Enhanced)
+============================================================
+  [PASS] WS method: TrySitOnNearestWindow
+  [PASS] WS property: IsSitting
+  [PASS] WS property: IsFalling
+  [PASS] WS event: OnSittingChanged
+  [PASS] WS event: OnFallStarted
+  [PASS] WS event: OnFallLanded
+
+============================================================
+  TEST 7: Phase 8 - DesktopLocomotionController API
+============================================================
+  [PASS] DLC method: ToggleEnabled
+  [PASS] DLC method: StartPeek
+  [PASS] DLC method: StopPeek
+  [PASS] DLC property: IsWalking
+  [PASS] DLC property: IsPeeking
+  [PASS] DLC property: IsEnabled
+  [PASS] DLC event: OnWalkStateChanged
+  [PASS] DLC event: OnPeekStateChanged
+
+============================================================
+  TEST 8: HotkeyManager Phase 8 Bindings
+============================================================
+  [PASS] HotkeyManager.locomotionController wired
+  [PASS] HotkeyManager.windowSnapper wired
+
+============================================================
+  TEST 9: Play Mode Smoke Test
+============================================================
+  [PASS] Console log cleared
+  [PASS] Play mode requested -- ENTERING_PLAY
+  ... waiting 12s for play mode ...
+  [PASS] Play mode active
+  [FAIL] Runtime errors: 2
+  [PASS] Runtime: CompanionManager active
+  [PASS] Runtime: DesktopLocomotionController active
+  [PASS] Runtime: WindowSnapper active
+
+============================================================
+  TEST 10: All Runtime Components Active
+============================================================
+  [PASS] Runtime: CompanionManager
+  [PASS] Runtime: WebSocketClient
+  [PASS] Runtime: MessageHandler
+  [PASS] Runtime: AvatarController
+  [PASS] Runtime: EmotionController
+  [PASS] Runtime: LipSyncController
+  [PASS] Runtime: EyeTrackingController
+  [PASS] Runtime: BlinkController
+  [PASS] Runtime: AnimationBlendController
+  [PASS] Runtime: IdleAnimationController
+  [PASS] Runtime: BeatDanceController
+  [PASS] Runtime: VrmaAnimationController
+  [PASS] Runtime: TouchReactionController
+  [PASS] Runtime: WindowSnapper
+  [PASS] Runtime: HotkeyManager
+  [PASS] Runtime: SpeechBubble
+  [PASS] Runtime: DebugOverlay
+  [PASS] Runtime: DragAnimationController
+  [PASS] Runtime: TouchSoundHandler
+  [PASS] Runtime: ParticleEffectHandler
+  [PASS] Runtime: SleepController
+  [PASS] Runtime: SystemTrayController
+  [PASS] Runtime: SettingsManager
+  [PASS] Runtime: MemoryOptimizer
+  [PASS] Runtime: FPSController
+  [PASS] Runtime: DesktopLocomotionController
+
+============================================================
+  TEST 11: Error Log Details
+============================================================
+  [PASS] No error entries in console log
+
+============================================================
+  Cleanup: Exit Play Mode
+============================================================
+  [PASS] Play mode exited -- EXITING
+
+============================================================
+  SUMMARY
+============================================================
+  PASSED: 134/135
+  FAILED: 1/135
+  >>> 1 FAILURE(S) <<<
