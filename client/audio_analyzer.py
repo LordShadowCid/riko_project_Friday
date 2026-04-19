@@ -11,6 +11,12 @@ import json
 from collections import deque
 
 try:
+    import webrtcvad as _webrtcvad
+    HAS_WEBRTCVAD = True
+except ImportError:
+    HAS_WEBRTCVAD = False
+
+try:
     import pyaudiowpatch as pyaudio
     HAS_PYAUDIO = True
 except ImportError:
@@ -18,11 +24,90 @@ except ImportError:
     print("[Audio] PyAudioWPatch not installed. Run: pip install PyAudioWPatch")
 
 
+# ============================================================================
+# VADProcessor — WebRTC-based speech/non-speech classifier (Phase 4)
+# ============================================================================
+
+
+class VADProcessor:
+    """
+    Lightweight wrapper around webrtcvad for chunk-level speech detection.
+    Converts float32 audio to int16 PCM, runs VAD on 30ms frames, and
+    returns True when the fraction of frames with speech exceeds a threshold.
+
+    Falls back gracefully to energy-based detection when webrtcvad is absent.
+    """
+
+    # webrtcvad requires exactly 8000, 16000, 32000, or 48000 Hz.
+    _VALID_RATES = {8000, 16000, 32000, 48000}
+    # Valid frame durations in ms.
+    _FRAME_MS = 30
+
+    def __init__(self, sample_rate: int = 16000, aggressiveness: int = 2, speech_ratio: float = 0.2):
+        """
+        Args:
+            sample_rate:   Audio sample rate.  Must be one of 8k/16k/32k/48k.
+            aggressiveness: 0-3.  Higher = more aggressive non-speech filtering.
+            speech_ratio:  Fraction of frames that must be speech to return True.
+        """
+        # Read from settings registry if available
+        try:
+            from server.settings_registry import registry
+            aggressiveness = int(registry.get("VAD_AGGRESSIVENESS"))
+            speech_ratio = float(registry.get("VAD_SPEECH_RATIO"))
+        except Exception:
+            pass
+
+        self.sample_rate = sample_rate if sample_rate in self._VALID_RATES else 16000
+        self.aggressiveness = max(0, min(3, aggressiveness))
+        self.speech_ratio = max(0.0, min(1.0, speech_ratio))
+        self._vad = None
+        if HAS_WEBRTCVAD:
+            self._vad = _webrtcvad.Vad(self.aggressiveness)
+
+    def detect_speech(self, audio_float32: "np.ndarray") -> bool:
+        """
+        Return True if *audio_float32* (mono, float32) contains speech.
+
+        Falls back to RMS energy check if webrtcvad is unavailable or the
+        chunk cannot be resampled to a supported rate.
+        """
+        if self._vad is None or not HAS_WEBRTCVAD:
+            # Fallback: energy threshold
+            return float(np.sqrt(np.mean(audio_float32 ** 2))) > 0.01
+
+        # Convert float32 → int16 PCM
+        pcm = (np.clip(audio_float32, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
+
+        frame_samples = int(self.sample_rate * self._FRAME_MS / 1000)
+        frame_bytes = frame_samples * 2  # 2 bytes per int16 sample
+
+        if len(pcm) < frame_bytes:
+            return False  # Too short to classify
+
+        speech_frames = 0
+        total_frames = 0
+        for start in range(0, len(pcm) - frame_bytes + 1, frame_bytes):
+            frame = pcm[start: start + frame_bytes]
+            total_frames += 1
+            try:
+                if self._vad.is_speech(frame, self.sample_rate):
+                    speech_frames += 1
+            except Exception:
+                pass
+
+        if total_frames == 0:
+            return False
+        return (speech_frames / total_frames) >= self.speech_ratio
+
+
+# ============================================================================
 class SystemAudioAnalyzer:
     """Captures and analyzes system audio in real-time using WASAPI loopback."""
     
-    def __init__(self, chunk_size=1024):
+    def __init__(self, chunk_size=1024, preferred_device_name: str = ""):
         self.chunk_size = chunk_size
+        self.preferred_device_name = (preferred_device_name or "").strip()
         self.running = False
         self.thread = None
         
@@ -59,6 +144,13 @@ class SystemAudioAnalyzer:
         
         # Callbacks for sending data
         self.on_analysis_update = None
+
+        # WebRTC VAD pre-filter (Phase 4)
+        # Enabled by default when webrtcvad-wheels is installed.
+        self._vad_processor: VADProcessor | None = None
+        self.vad_enabled: bool = HAS_WEBRTCVAD
+        if HAS_WEBRTCVAD:
+            self._vad_processor = VADProcessor(sample_rate=16000)
     
     def _find_loopback_device(self):
         """Find the WASAPI loopback device matching the default output."""
@@ -68,16 +160,7 @@ class SystemAudioAnalyzer:
         try:
             self.p = pyaudio.PyAudio()
             
-            # Get the default output device name
-            try:
-                default_output = self.p.get_default_output_device_info()
-                default_name = default_output.get('name', '').lower()
-                print(f"[Audio] Default output device: {default_output.get('name')}")
-            except Exception as e:
-                print(f"[Audio] Could not get default output: {e}")
-                default_name = ''
-            
-            # Collect all loopback devices
+            # Collect all loopback devices first
             loopback_devices = []
             for i in range(self.p.get_device_count()):
                 dev = self.p.get_device_info_by_index(i)
@@ -88,20 +171,48 @@ class SystemAudioAnalyzer:
             if not loopback_devices:
                 print("[Audio] No loopback devices found")
                 return None
-            
-            # Try to find loopback that matches default output
-            for dev in loopback_devices:
-                dev_name = dev['name'].lower()
-                # Check if the loopback device name contains the default output name
-                # (loopback names often have " [Loopback]" suffix)
-                if default_name and (default_name in dev_name or 
-                    dev_name.replace(' [loopback]', '') in default_name or
-                    default_name.replace('(b', '(bcc950') in dev_name):  # Handle truncated names
-                    print(f"[Audio] Selected loopback (matches default): {dev['name']}")
-                    return dev
-            
-            # Fallback: just use the first loopback device
-            print(f"[Audio] Using first loopback (no match found): {loopback_devices[0]['name']}")
+
+            # 1. Preferred device from config (partial, case-insensitive match)
+            if self.preferred_device_name:
+                hint = self.preferred_device_name.lower()
+                for dev in loopback_devices:
+                    if hint in dev['name'].lower():
+                        print(f"[Audio] Selected loopback (config preferred): {dev['name']}")
+                        return dev
+                print(f"[Audio] Preferred device '{self.preferred_device_name}' not found, trying default")
+
+            # 2. Match the Windows default output device
+            default_name = ''
+            try:
+                default_output = self.p.get_default_output_device_info()
+                default_name = default_output.get('name', '').lower()
+                print(f"[Audio] Default output device: {default_output.get('name')}")
+            except Exception as e:
+                print(f"[Audio] Could not get default output: {e}")
+
+            if default_name:
+                for dev in loopback_devices:
+                    dev_name = dev['name'].lower()
+                    # Loopback names often have " [Loopback]" suffix; strip it for comparison
+                    dev_base = dev_name.replace(' [loopback]', '')
+                    if default_name in dev_name or dev_base in default_name:
+                        print(f"[Audio] Selected loopback (matches default output): {dev['name']}")
+                        return dev
+
+            # 3. Fallback: prefer non-conference/headset devices (likely music speakers)
+            #    BUT if the preferred device was a conference device, don't exclude them
+            _non_conf_keywords = ('webcam', 'microphone')
+            if not self.preferred_device_name:
+                # Only exclude conference/headset when no preferred device was specified
+                _non_conf_keywords = ('conference', 'speakerphone', 'webcam', 'headset', 'headphone', 'microphone')
+            non_conf = [d for d in loopback_devices
+                        if not any(kw in d['name'].lower() for kw in _non_conf_keywords)]
+            if non_conf:
+                print(f"[Audio] Using first non-conference loopback: {non_conf[0]['name']}")
+                return non_conf[0]
+
+            # 4. Last resort: first loopback device
+            print(f"[Audio] Using first loopback (fallback): {loopback_devices[0]['name']}")
             return loopback_devices[0]
             
         except Exception as e:
@@ -177,7 +288,20 @@ class SystemAudioAnalyzer:
                 # Convert to mono if stereo
                 if self.channels > 1:
                     audio = audio.reshape(-1, self.channels).mean(axis=1)
-                
+
+                # VAD pre-filter: skip analysis on non-speech frames
+                if self.vad_enabled and self._vad_processor is not None:
+                    # Downsample to 16 kHz for VAD if captured at higher rate
+                    import scipy.signal as _sig
+                    target_sr = 16000
+                    if self.sample_rate != target_sr:
+                        num_samples = int(len(audio) * target_sr / self.sample_rate)
+                        vad_audio = _sig.resample(audio, num_samples).astype(np.float32)
+                    else:
+                        vad_audio = audio
+                    if not self._vad_processor.detect_speech(vad_audio):
+                        continue  # Skip silent / non-speech chunk
+
                 # Analyze
                 self._analyze_chunk(audio)
                 

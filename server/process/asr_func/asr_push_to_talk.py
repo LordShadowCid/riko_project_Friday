@@ -1,34 +1,11 @@
 import os
 import sounddevice as sd
 import soundfile as sf
+from server.utils import configure_windows_cuda_runtime, resolve_device
+
+configure_windows_cuda_runtime()
+
 from faster_whisper import WhisperModel
-
-
-def _resolve_device(device, kind='input'):
-    """Resolve a sounddevice input/output device selector.
-
-    - None: use default
-    - int: treated as device index
-    - str: case-insensitive substring match against device names
-    - kind: 'input' or 'output' - filters to only match devices with channels for that direction
-    """
-    if device is None or device == "":
-        return None
-    if isinstance(device, int):
-        return device
-    if isinstance(device, str):
-        devices = sd.query_devices()
-        needle = device.lower().strip()
-        for idx, d in enumerate(devices):
-            name = str(d.get("name", "")).lower()
-            if needle and needle in name:
-                # Filter by device capability
-                if kind == 'output' and d.get('max_output_channels', 0) > 0:
-                    return idx
-                elif kind == 'input' and d.get('max_input_channels', 0) > 0:
-                    return idx
-                # If kind doesn't match, keep searching
-    return None
 
 def record_and_transcribe(model, output_file="recording.wav", samplerate=44100, input_device=None):
     """
@@ -44,7 +21,7 @@ def record_and_transcribe(model, output_file="recording.wav", samplerate=44100, 
     
     print("[REC] Recording... Press ENTER to stop")
     
-    device = _resolve_device(input_device, kind='input')
+    device = resolve_device(input_device, kind='input')
 
     # Record audio directly
     recording = sd.rec(

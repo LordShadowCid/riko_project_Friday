@@ -7,6 +7,7 @@ from pathlib import Path
 
 from server.annabeth_config import load_config, resolve_repo_path
 from server.utils import resolve_device as _resolve_device
+from server.process.tts_func.rvc_convert import get_rvc_converter
 
 char_config = load_config()
 
@@ -102,28 +103,48 @@ def sovits_gen(in_text, output_wav_pth = "output.wav"):
         "prompt_lang": char_config['sovits_ping_config']['prompt_lang']
     }
 
-    try:
-        # Use session pooling for faster connection reuse
-        session = _get_tts_session()
-        response = session.post(url, json=payload, timeout=30)
-        response.raise_for_status()  # throws if not 200
+    max_retries = 2
+    last_err = None
+    for attempt in range(max_retries + 1):
+        try:
+            # Use session pooling for faster connection reuse
+            session = _get_tts_session()
+            response = session.post(url, json=payload, timeout=30)
+            response.raise_for_status()  # throws if not 200
 
-        # Save the response audio if it's binary
-        with open(output_wav_pth, "wb") as f:
-            f.write(response.content)
+            # Save the response audio if it's binary
+            with open(output_wav_pth, "wb") as f:
+                f.write(response.content)
 
-        return output_wav_pth
+            # Optional RVC voice conversion (no-op when disabled/unavailable)
+            rvc = get_rvc_converter()
+            if rvc is not None:
+                output_wav_pth = rvc.convert(output_wav_pth)
 
-    except Exception as e:
-        print(f"Error in sovits_gen: {e}")
-        print("[TTS] Trying pyttsx3 fallback...")
-        return _fallback_tts(in_text, output_wav_pth)
+            return output_wav_pth
+
+        except Exception as e:
+            last_err = e
+            if attempt < max_retries:
+                import time as _time
+                _time.sleep(0.5)
+                print(f"[TTS] GPT-SoVITS attempt {attempt+1} failed ({e}), retrying...")
+            else:
+                print(f"Error in sovits_gen after {max_retries+1} attempts: {e}")
+                print("[TTS] Trying pyttsx3 fallback...")
+                return _fallback_tts(in_text, output_wav_pth)
 
 
 def _fallback_tts(text, output_wav_pth):
     """Fallback TTS using pyttsx3 (Windows SAPI5) when GPT-SoVITS is unavailable."""
     try:
         import pyttsx3
+        # Ensure COM is initialized for the current thread (required on Windows worker threads)
+        try:
+            import pythoncom
+            pythoncom.CoInitialize()
+        except Exception:
+            pass
         engine = pyttsx3.init()
         engine.setProperty('rate', 170)
         engine.save_to_file(text, str(output_wav_pth))

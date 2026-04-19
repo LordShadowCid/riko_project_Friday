@@ -30,6 +30,7 @@ class MessageType(str, Enum):
     SET_SILENCE = "set_silence"
     READ_PAUSE = "read_pause"      # Q key - pause read-aloud to ask question
     READ_RESUME = "read_resume"    # R key - resume read-aloud
+    SHUTDOWN = "shutdown"           # Unity closing - tell backend to exit
     
     # Server -> Client
     SPEAK_START = "speak_start"
@@ -42,13 +43,19 @@ class MessageType(str, Enum):
 
 
 class Emotion(str, Enum):
-    """Avatar emotion states."""
-    NEUTRAL = "neutral"
-    HAPPY = "happy"
-    SAD = "sad"
-    ANGRY = "angry"
+    """Avatar emotion states (Plutchik-wheel model, 11 canonical + thinking)."""
+    NEUTRAL   = "neutral"
+    HAPPY     = "happy"
+    SAD       = "sad"
+    ANGRY     = "angry"
+    FEAR      = "fear"
+    DISGUST   = "disgust"
     SURPRISED = "surprised"
-    THINKING = "thinking"
+    RELAXED   = "relaxed"
+    LOVE      = "love"
+    AROUSAL   = "arousal"
+    DEVOTION  = "devotion"
+    THINKING  = "thinking"
 
 
 # =============================================================================
@@ -66,7 +73,7 @@ class ServerConfig:
     companion_http_port: int = 8766
     
     # TTS server (GPT-SoVITS)
-    tts_host: str = "localhost"
+    tts_host: str = "127.0.0.1"
     tts_port: int = 9880
     
     @property
@@ -77,7 +84,7 @@ class ServerConfig:
     @property
     def avatar_http_url(self) -> str:
         """HTTP URL for avatar server."""
-        return f"http://localhost:{self.avatar_port}"
+        return f"http://127.0.0.1:{self.avatar_port}"
     
     @property
     def tts_url(self) -> str:

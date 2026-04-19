@@ -33,42 +33,75 @@ clients: Set[WebSocketClient] = set()
 _audio_analyzer = None
 _audio_broadcast_task: Optional["asyncio.Task[None]"] = None
 
-# Get shared state instance
-_state = get_companion_state()
 _config = get_config()
+
+
+def _get_state():
+    """Return the live shared companion state instance."""
+    return get_companion_state()
 
 
 def get_current_mode() -> CompanionMode:
     """Get the current companion mode."""
-    return _state.mode
+    return _get_state().mode
 
 
 def is_chat_silenced() -> bool:
     """Check if chat is silenced (S key toggle)."""
-    return _state.silenced
+    return _get_state().silenced
 
 
 def set_chat_silenced(silenced: bool) -> None:
     """Set chat silence state."""
-    _state.silenced = silenced
+    _get_state().silenced = silenced
 
 
 def toggle_chat_silence() -> bool:
     """Toggle chat silence on/off."""
-    return _state.toggle_silence()
+    return _get_state().toggle_silence()
 
 
 def is_listening_paused() -> bool:
     """Check if listening should be paused (silenced OR not in active mode)."""
-    return _state.is_listening_paused()
+    return _get_state().is_listening_paused()
+
+
+async def _send_state_snapshot(ws: WebSocketClient) -> None:
+    """Send the current shared companion state to a newly connected client."""
+    state = _get_state()
+    await ws.send_str(json.dumps({
+        "type": MessageType.MODE_CHANGE.value,
+        "mode": state.mode.value,
+    }))
+    await ws.send_str(json.dumps({
+        "type": MessageType.SET_SILENCE.value,
+        "silenced": state.silenced,
+    }))
+
+
+async def _broadcast_mode_change() -> None:
+    state = _get_state()
+    await broadcast({
+        "type": MessageType.MODE_CHANGE.value,
+        "mode": state.mode.value,
+    })
+
+
+async def _broadcast_silence_state() -> None:
+    state = _get_state()
+    await broadcast({
+        "type": MessageType.SET_SILENCE.value,
+        "silenced": state.silenced,
+    })
 
 async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
     """Handle WebSocket connections from the avatar frontend"""
-    ws = web.WebSocketResponse()
+    ws = web.WebSocketResponse(heartbeat=20.0)  # Ping every 20s to keep connection alive
     await ws.prepare(request)
     
     clients.add(ws)
     print(f"[Avatar] Client connected. Total: {len(clients)}")
+    await _send_state_snapshot(ws)
     
     try:
         async for msg in ws:
@@ -80,15 +113,18 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
                 if msg_type == MessageType.MODE_CHANGE.value:
                     mode_str = data.get('mode', 'active')
                     try:
-                        _state.mode = CompanionMode(mode_str)
+                        _get_state().mode = CompanionMode(mode_str)
+                        await _broadcast_mode_change()
                     except ValueError:
                         print(f"[Avatar] Unknown mode: {mode_str}")
                         
                 elif msg_type == MessageType.TOGGLE_SILENCE.value:
                     toggle_chat_silence()
+                    await _broadcast_silence_state()
                     
                 elif msg_type == MessageType.SET_SILENCE.value:
                     set_chat_silenced(data.get('silenced', False))
+                    await _broadcast_silence_state()
                 
                 elif msg_type == MessageType.READ_PAUSE.value:
                     # Q key pressed - pause read-aloud immediately
@@ -126,6 +162,17 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
                             sound_threshold=data.get('sound_threshold'),
                             filter_apps=data.get('filter_apps')
                         )
+
+                elif msg_type == 'selected_text':
+                    # Browser extension: user highlighted text in browser
+                    text = data.get('text', '').strip()
+                    if text:
+                        _get_state().browser_selected_text = text
+
+                elif msg_type == MessageType.SHUTDOWN.value:
+                    # Unity is closing — signal the backend to exit
+                    print("[Avatar] Shutdown requested by Unity frontend")
+                    _get_state().shutdown_requested = True
                     
                 else:
                     print(f"[Avatar] Received: {data}")
@@ -235,13 +282,26 @@ def start_audio_analyzer() -> bool:
             sys.path.insert(0, str(client_dir))
         
         from audio_analyzer import SystemAudioAnalyzer
-        
-        _audio_analyzer = SystemAudioAnalyzer()
+
+        # Read preferred loopback device from character_config.yaml (if set)
+        preferred_device = ""
+        try:
+            from server.annabeth_config import load_config as _load_cfg
+            _cfg = _load_cfg()
+            preferred_device = (
+                (_cfg.get("audio_capture") or _cfg.get("audio") or {})
+                .get("loopback_device_name", "")
+            ).strip()
+        except Exception:
+            pass
+
+        _audio_analyzer = SystemAudioAnalyzer(preferred_device_name=preferred_device)
         if _audio_analyzer.start():
             print("[Avatar] System audio analyzer started")
             return True
         else:
             print("[Avatar] Failed to start audio analyzer (no loopback device)")
+            _audio_analyzer = None  # Don't broadcast zeros if capture never started
             return False
     except ImportError as e:
         print(f"[Avatar] Audio analyzer not available: {e}")
@@ -333,6 +393,22 @@ _server_runner: Optional[web.AppRunner] = None
 _server_task: Optional["asyncio.Task[None]"] = None
 
 
+async def _emotion_broadcast_loop() -> None:
+    """Broadcast the dominant emotion to all clients every 5 seconds."""
+    while True:
+        if clients:
+            try:
+                from server.process.memory.emotion_state import get_dominant_emotion
+                dominant = get_dominant_emotion()
+                await broadcast({
+                    "type": MessageType.EMOTION.value,
+                    "emotion": dominant,
+                })
+            except Exception:
+                pass
+        await asyncio.sleep(5.0)
+
+
 async def start_avatar_server() -> web.AppRunner:
     """Start the avatar server (call from main_chat.py)"""
     global _server_runner, _audio_broadcast_task
@@ -343,7 +419,17 @@ async def start_avatar_server() -> web.AppRunner:
     
     # Start audio broadcast loop
     _audio_broadcast_task = asyncio.create_task(_audio_broadcast_loop())
-    
+
+    # Start emotion decay loop (runs in a background daemon thread)
+    try:
+        from server.process.memory.emotion_state import start_decay_loop
+        start_decay_loop(interval_seconds=60)
+    except Exception as e:
+        print(f"[Avatar] Emotion decay loop start failed (non-fatal): {e}")
+
+    # Start periodic emotion broadcast (every 5 s)
+    asyncio.create_task(_emotion_broadcast_loop())
+
     return _server_runner
 
 
@@ -366,7 +452,7 @@ def get_avatar_api() -> Dict[str, Any]:
         'toggle_chat_silence': toggle_chat_silence,
         'set_chat_silenced': set_chat_silenced,
         # Add new state accessors
-        'get_state': lambda: _state,
+        'get_state': _get_state,
         'get_config': lambda: _config,
     }
 

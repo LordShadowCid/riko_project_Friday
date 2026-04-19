@@ -105,7 +105,21 @@
 
   function handleHighlight(msg) {
     const sentence = msg.sentence || '';
-    const timings = msg.word_timings || [];
+    const timings = Array.isArray(msg.word_timings)
+      ? msg.word_timings.filter((timing) => {
+          return timing
+            && typeof timing.word === 'string'
+            && Number.isFinite(timing.start)
+            && Number.isFinite(timing.end);
+        })
+      : [];
+
+    if (!sentence.trim() || timings.length === 0) {
+      console.warn('[Annabeth] Ignoring invalid read_highlight payload', msg);
+      handleClear();
+      return;
+    }
+
     renderSentence(sentence, timings);
   }
 
@@ -120,6 +134,31 @@
       handleHighlight(msg);
     } else if (msg.type === 'read_clear') {
       handleClear();
+    }
+  });
+
+  // ── Browser text selection → send to Annabeth ───────────────────────
+  // When the user highlights text in the browser, Annabeth receives it
+  // as context for the next message sent to her.
+  let _selTimer = null;
+
+  function sendSelection() {
+    const text = (window.getSelection() || {}).toString?.().trim() || '';
+    if (text.length >= 5 && text.length <= 4000) {
+      chrome.runtime.sendMessage({ type: 'selected_text', text });
+    }
+  }
+
+  document.addEventListener('mouseup', () => {
+    clearTimeout(_selTimer);
+    _selTimer = setTimeout(sendSelection, 350);
+  });
+
+  // Keyboard selection (Shift+arrow, Ctrl+A, etc.)
+  document.addEventListener('keyup', (e) => {
+    if (e.shiftKey || e.ctrlKey) {
+      clearTimeout(_selTimer);
+      _selTimer = setTimeout(sendSelection, 350);
     }
   });
 })();

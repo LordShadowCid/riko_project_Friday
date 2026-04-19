@@ -120,11 +120,15 @@ Write-Host ''
 Write-Host '>>> VISUAL C++ BUILD TOOLS'
 $progX86 = [Environment]::GetFolderPath('ProgramFilesX86')
 $vsWhere = Join-Path $progX86 'Microsoft Visual Studio\Installer\vswhere.exe'
+$knownBuildToolsPath = Join-Path $progX86 'Microsoft Visual Studio\2022\BuildTools'
 if (Test-Path $vsWhere) {
     $installs = & $vsWhere -all -format json 2>$null | ConvertFrom-Json
     foreach ($inst in $installs) {
         Write-Host ('  ' + $inst.displayName + ' - ' + $inst.installationVersion)
     }
+}
+elseif (Test-Path $knownBuildToolsPath) {
+    Write-Host ('  Microsoft Visual Studio 2022 Build Tools - installed at ' + $knownBuildToolsPath)
 }
 else {
     Write-Host '  Visual Studio / Build Tools NOT detected'

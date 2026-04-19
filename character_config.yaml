@@ -1,6 +1,6 @@
 # Ollama configuration (local LLM)
 ollama:
-  host: http://localhost:11434
+  host: http://127.0.0.1:11434
   # Uncensored models (recommended for roleplay):
   #   mannix/llama3.1-8b-abliterated - Llama 3.1 with censorship removed (abliterated) [CURRENT]
   #   dolphin3:8b - Dolphin 3.0, designed to be uncensored/steerable (available locally)
@@ -10,12 +10,12 @@ ollama:
   #   qwen3:14b - Smartest but slowest (wait for RAM+1 / 96GB)
   #   llama3.1:8b - Fast but censored
   model: mannix/llama3.1-8b-abliterated
-  # Keep model loaded in memory for faster responses (in seconds, -1 = forever)
-  keep_alive: 3600
+  # Keep model loaded in memory for faster responses (-1 = never unload)
+  keep_alive: -1
   # Enable streaming for faster first response
   stream: true
-  # Context window — 3072 is safe for 8B model on 16GB VRAM
-  num_ctx: 3072
+  # Context window — 4096 halves prompt-eval time vs 8192 (still ~4GB on 16GB A4000)
+  num_ctx: 4096
 
 # RAM-based response cache for faster repeated queries
 # Caches recent query-response pairs to avoid regenerating similar responses
@@ -31,10 +31,34 @@ tools:
   # Timeout per tool execution (seconds)
   timeout_sec: 10
 
+# LLM Model auto-routing — use a fast model for simple queries
+model_routing:
+  enabled: true
+  # Primary model for complex/long responses
+  primary_model: mannix/llama3.1-8b-abliterated
+  # Fast model for greetings, quick questions (must be pulled in Ollama)
+  fast_model: gemma3:4b
+
+# RVC (Retrieval-based Voice Conversion) — post-processes GPT-SoVITS output
+# Set enabled: true and place your .pth model in model_dir to activate
+rvc:
+  enabled: false
+  model_dir: character_files/rvc_models
+  model_name: annabeth.pth
+  pitch_shift: 0          # semitones, negative = lower pitch
+  f0_method: harvest      # options: harvest, crepe, parselmouth
+
+# Self-improvement — AST-based code analysis and proposal system
+# Proposals are written to C:\annabeth_data\proposals.json for human review
+# auto_apply_risk: none (never auto-apply), low (apply only low-severity)
+self_improvement:
+  enabled: false
+  auto_apply_risk: none   # none | low
+
 history_file: chat_history.json
 model: "mannix/llama3.1-8b-abliterated"
-# 12 turns with 3072 ctx — good balance of memory vs speed
-max_history_turns: 12
+# 20 turns with 8192 ctx — larger context allows more conversation memory
+max_history_turns: 20
 
 # Windows/local runtime settings
 audio:
@@ -45,7 +69,8 @@ audio:
 
 whisper:
   # Common choices: base.en, small.en, medium.en, large-v3, turbo
-  model: base.en
+  # small.en gives much better accuracy than base.en; GPU 1 has 16GB — plenty of room
+  model: small.en
   # cpu or cuda
   device: cuda
   # Which GPU to use (0=RTX A4000, 1=Quadro RTX 4000)
@@ -126,11 +151,31 @@ presets:
       - Your text will be read aloud by a text-to-speech system, so write exactly what should be spoken
       - NEVER repeat a previous response. Each reply must be unique and address what was just said.
       
+      EMOTION TAGS:
+      - At least once per response, append an emotion tag block at the END of a sentence.
+      - Format: {emotion_name intensity_value} where intensity is 0.0-10.0
+      - You may include 1-3 emotions separated by commas: {happy 7.5, love 4.0}
+      - Valid emotions: happy, sad, angry, fear, disgust, surprised, neutral, relaxed, love, arousal, devotion
+      - Choose emotions that reflect how Annabeth genuinely feels in context.
+      - Example: "Oh really, senpai? That sounds amazing! {happy 8.5, arousal 3.0}"
+      - The tags are automatically removed before audio playback; they are for internal state only.
+      
       TOOLS:
       - You sometimes receive tool results (time, web search, memories) as system messages
       - When you see tool results, incorporate them naturally into your response
       - Don't say "according to my search" or "my tools tell me" — just state the info naturally
       - If told a memory was stored, briefly acknowledge it (e.g. "Got it, I'll remember that!")
+
+# Audio capture settings — controls which loopback device is used for dance-beat reactivity
+audio_capture:
+  # Partial name of the WASAPI loopback device to use for music detection.
+  # Leave blank to auto-select (uses the Windows default output device).
+  # Run: python -c "from client.audio_analyzer import SystemAudioAnalyzer; SystemAudioAnalyzer()._find_loopback_device()"
+  # to see which devices are available, then paste a unique substring here.
+  # Example: "S24e-20"  (Samsung monitor speakers)
+  #          "Realtek"  (Realtek audio)
+  # Leave empty for auto-select (default Windows output):
+  loopback_device_name: "BCC950"
 
 sovits_ping_config:
   text_lang: en

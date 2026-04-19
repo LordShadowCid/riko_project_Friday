@@ -19,6 +19,13 @@ from pathlib import Path
 from io import StringIO
 from difflib import SequenceMatcher
 
+# ── Fix Windows console encoding for Unicode output ─────────────────
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # ── Ensure project root is on path ──────────────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parent
 os.chdir(PROJECT_ROOT)
@@ -146,7 +153,7 @@ def test_ollama():
             "options": {"num_predict": 20, "temperature": 0.1},
         }
         t0 = time.time()
-        r = req.post(f"{host}/api/chat", json=payload, timeout=30)
+        r = req.post(f"{host}/api/chat", json=payload, timeout=180)
         elapsed = time.time() - t0
         r.raise_for_status()
         resp = (r.json().get("message") or {}).get("content", "")

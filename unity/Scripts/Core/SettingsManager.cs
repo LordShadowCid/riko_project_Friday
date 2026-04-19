@@ -66,6 +66,34 @@ namespace Annabeth.Core
             Debug.Log("[SettingsManager] Reset to defaults.");
         }
 
+        // ── Cached controller references (avoid repeated FindFirstObjectByType) ──
+        private FPSController _cachedFps;
+        private MemoryOptimizer _cachedMem;
+        private TransparentWindowController _cachedWin;
+        private SleepController _cachedSleep;
+        private Avatar.EyeTrackingController _cachedEye;
+        private Avatar.DragAnimationController _cachedSway;
+        private WebSocketClient _cachedWs;
+        private DesktopAmbientProbe _cachedAmbient;
+        private Avatar.AvatarController _cachedAvatar;
+        private UI.ThemeManager _cachedTheme;
+        private Avatar.IKController _cachedIk;
+
+        private T GetCached<T>(ref T cache) where T : MonoBehaviour
+        {
+            if (cache == null) cache = FindFirstObjectByType<T>();
+            return cache;
+        }
+
+        /// <summary>Call when a VRM is loaded or controllers are recreated to clear stale caches.</summary>
+        public void InvalidateControllerCache()
+        {
+            _cachedFps = null; _cachedMem = null; _cachedWin = null;
+            _cachedSleep = null; _cachedEye = null; _cachedSway = null;
+            _cachedWs = null; _cachedAmbient = null; _cachedAvatar = null;
+            _cachedTheme = null; _cachedIk = null;
+        }
+
         /// <summary>
         /// Push current settings values to all live controllers.
         /// Called once after VRM loads and whenever settings change.
@@ -73,24 +101,21 @@ namespace Annabeth.Core
         public void ApplyAllSettings()
         {
             // FPS
-            var fps = FindFirstObjectByType<FPSController>();
-            fps?.ApplySettings();
+            GetCached(ref _cachedFps)?.ApplySettings();
 
             // Memory optimizer
-            var mem = FindFirstObjectByType<MemoryOptimizer>();
-            mem?.ApplySettings();
+            GetCached(ref _cachedMem)?.ApplySettings();
 
             // Always-on-top
-            var win = FindFirstObjectByType<TransparentWindowController>();
+            var win = GetCached(ref _cachedWin);
             if (win != null)
                 win.SetTopmost(data.alwaysOnTop);
 
             // Sleep controller
-            var sleep = FindFirstObjectByType<SleepController>();
-            sleep?.ApplySettings();
+            GetCached(ref _cachedSleep)?.ApplySettings();
 
             // Eye / spine tracking (per-component speeds + spine blend)
-            var eye = FindFirstObjectByType<Avatar.EyeTrackingController>();
+            var eye = GetCached(ref _cachedEye);
             if (eye != null)
             {
                 eye.SetEnabled(data.enableMouseTracking);
@@ -101,7 +126,7 @@ namespace Annabeth.Core
             }
 
             // Sway physics (drag animation)
-            var sway = FindFirstObjectByType<Avatar.DragAnimationController>();
+            var sway = GetCached(ref _cachedSway);
             if (sway != null)
             {
                 sway.SetSwayEnabled(data.enableSway);
@@ -117,7 +142,7 @@ namespace Annabeth.Core
             QualitySettings.SetQualityLevel(data.graphicsQuality, true);
 
             // Feature #24: Send audio threshold/filter to Python backend
-            var ws = FindFirstObjectByType<WebSocketClient>();
+            var ws = GetCached(ref _cachedWs);
             if (ws != null)
             {
                 ws.Send("audio_config", new System.Collections.Generic.Dictionary<string, object>
@@ -128,19 +153,37 @@ namespace Annabeth.Core
             }
 
             // Feature #9: Ambient probe settings
-            var ambient = FindFirstObjectByType<DesktopAmbientProbe>();
+            var ambient = GetCached(ref _cachedAmbient);
             if (ambient != null)
             {
                 ambient.SetEnabled(data.enableAmbientProbe);
                 ambient.SetIntensity(data.ambientProbeIntensity);
             }
 
+            // Avatar size + character opacity
+            var avatarCtrl = GetCached(ref _cachedAvatar);
+            if (avatarCtrl != null)
+            {
+                avatarCtrl.ApplyAvatarSize(data.avatarSize);
+                avatarCtrl.ApplyCharacterOpacity(data.characterOpacity);
+            }
+
+            // v5: Theme manager
+            var theme = GetCached(ref _cachedTheme);
+            if (theme != null)
+                theme.ApplyTheme(data.uiHueShift, data.uiSaturation);
+
+            // v5: IK controller
+            var ik = GetCached(ref _cachedIk);
+            if (ik != null)
+                ik.SetEnabled(data.enableIK);
+
             Debug.Log("[SettingsManager] Applied all settings.");
         }
 
         // ── Start with Windows ────────────────────────────────────
 
-#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+#if UNITY_STANDALONE_WIN
         [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
         static extern int RegOpenKeyExW(IntPtr hKey, string subKey, uint options, uint sam, out IntPtr result);
         [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
@@ -155,7 +198,7 @@ namespace Annabeth.Core
 
         private void ApplyStartWithWindows()
         {
-#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+#if UNITY_STANDALONE_WIN
             try
             {
                 if (RegOpenKeyExW(HKCU, @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
@@ -168,7 +211,7 @@ namespace Annabeth.Core
                             string exe = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName ?? "";
                             if (exe.Length > 0)
                             {
-                                string val = $"\"{ exe}\"";
+                                string val = $"\"{exe}\"";
                                 byte[] bytes = System.Text.Encoding.Unicode.GetBytes(val + "\0");
                                 RegSetValueExW(hKey, "Annabeth", 0, 1 /* REG_SZ */, bytes, (uint)bytes.Length);
                             }
@@ -262,6 +305,30 @@ namespace Annabeth.Core
                 Debug.Log("[SettingsManager] Migrated v2 → v3 (graphics quality, random messages, ambient, audio filter).");
             }
 
+            // ── Version 3 → 4: Character opacity ──
+            if (data.settingsVersion < 4)
+            {
+                data.characterOpacity = 1.0f;
+                data.settingsVersion = 4;
+                Debug.Log("[SettingsManager] Migrated v3 → v4 (character opacity).");
+            }
+
+            // ── Version 4 → 5: Theme, IK, Accessories ──
+            if (data.settingsVersion < 5)
+            {
+                data.uiHueShift = 0f;
+                data.uiSaturation = 1f;
+                data.enableIK = true;
+                data.settingsVersion = 5;
+                Debug.Log("[SettingsManager] Migrated v4 → v5 (theme, IK, accessories).");
+            }
+            // ── Version 5 → 6: Speech bubble on by default ──
+            if (data.settingsVersion < 6)
+            {
+                data.enableSpeechBubble = true;
+                data.settingsVersion = 6;
+                Debug.Log("[SettingsManager] Migrated v5 → v6 (speech bubble default on).");
+            }
             // Range clamping (always runs)
             data.fpsLimit = Mathf.Clamp(data.fpsLimit, 15, 165);
             data.sleepTimerSeconds = Mathf.Clamp(data.sleepTimerSeconds, 30f, 360f);
@@ -283,6 +350,13 @@ namespace Annabeth.Core
             data.randomMessageIntervalMinutes = Mathf.Clamp(data.randomMessageIntervalMinutes, 5f, 30f);
             data.ambientProbeIntensity = Mathf.Clamp01(data.ambientProbeIntensity);
             data.soundThreshold = Mathf.Clamp(data.soundThreshold, 0f, 0.5f);
+
+            // v4 clamping
+            data.characterOpacity = Mathf.Clamp(data.characterOpacity, 0.1f, 1f);
+
+            // v5 clamping
+            data.uiHueShift = Mathf.Repeat(data.uiHueShift, 360f);
+            data.uiSaturation = Mathf.Clamp(data.uiSaturation, 0f, 2f);
         }
     }
 
@@ -294,7 +368,7 @@ namespace Annabeth.Core
     public class SettingsData
     {
         // Version for migration — bump when adding new fields
-        public int settingsVersion = 3;
+        public int settingsVersion = 6;
 
         // ── Display ─────────────────────────────────────────
         public int fpsLimit = 60;
@@ -304,6 +378,7 @@ namespace Annabeth.Core
         // ── Avatar ──────────────────────────────────────────
         public string selectedModelPath = "";   // Empty = default bundled model
         public float avatarSize = 1.0f;
+        public float characterOpacity = 1.0f;    // 0.1..1.0, how opaque the character appears
 
         // ── Animation / Tracking ────────────────────────────
         public bool enableMouseTracking = true;
@@ -331,7 +406,7 @@ namespace Annabeth.Core
         public float sfxVolume = 1.0f;
 
         // ── AI / Speech ─────────────────────────────────────
-        public bool enableSpeechBubble = false; // Off by default, toggle-on feature
+        public bool enableSpeechBubble = true;  // On by default
 
         // ── System ──────────────────────────────────────────
         public bool enableSleepMode = false;
@@ -348,5 +423,10 @@ namespace Annabeth.Core
         public float ambientProbeIntensity = 0.5f;     // 0..1
         public float soundThreshold = 0.02f;           // Audio threshold for dance (#24)
         public string soundFilterApps = "";            // Comma-separated app names (#24)
+
+        // ── v5: Theme / IK / Accessories ────────────────────
+        public float uiHueShift = 0f;                 // 0..360 degrees
+        public float uiSaturation = 1f;               // 0..2 multiplier
+        public bool enableIK = true;                   // Inverse kinematics (sit/drag poses)
     }
 }

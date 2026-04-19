@@ -3,11 +3,11 @@ Desktop Companion - Transparent, always-on-top VRM avatar window
 Uses pywebview to wrap the existing Three.js avatar as a desktop overlay
 """
 import asyncio
+import contextlib
 import threading
 import webview
 from pathlib import Path
 import sys
-import time
 
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -29,6 +29,8 @@ class DesktopCompanion:
         self.loop = None
         self.server_thread = None
         self.port = 8766  # Use different port to avoid conflicts
+        self.server_ready = threading.Event()
+        self.server_error = None
         
     def _run_server_loop(self):
         """Run the aiohttp server in a background thread"""
@@ -50,13 +52,13 @@ class DesktopCompanion:
                     self.port = port  # Update to actual port
                     print(f"[Desktop Companion] Server running on http://127.0.0.1:{port}")
                     self.server_runner = runner
+                    self.server_ready.set()
                     break
                 except OSError:
                     print(f"[Desktop Companion] Port {port} busy, trying next...")
                     continue
             else:
-                print("[Desktop Companion] Could not find an available port!")
-                return
+                raise RuntimeError("Could not find an available desktop companion port")
             
             # Keep the server running
             while True:
@@ -65,6 +67,8 @@ class DesktopCompanion:
         try:
             self.loop.run_until_complete(start_server())
         except Exception as e:
+            self.server_error = e
+            self.server_ready.set()
             print(f"[Desktop Companion] Server error: {e}")
     
     def start(self):
@@ -72,14 +76,12 @@ class DesktopCompanion:
         # Start the avatar server in a background thread
         self.server_thread = threading.Thread(target=self._run_server_loop, daemon=True)
         self.server_thread.start()
-        
-        # Give server time to start and find a port
-        time.sleep(2)
-        
-        # Check if server started
-        if self.server_runner is None:
-            print("[Desktop Companion] Server failed to start!")
-            return
+
+        if not self.server_ready.wait(timeout=5):
+            raise RuntimeError("Desktop companion server timed out during startup")
+
+        if self.server_error is not None:
+            raise RuntimeError(f"Desktop companion server failed to start: {self.server_error}") from self.server_error
         
         # Calculate position (bottom-right by default)
         if self.x is None or self.y is None:
@@ -94,7 +96,7 @@ class DesktopCompanion:
                     self.x = screen_width - self.width - 50
                 if self.y is None:
                     self.y = screen_height - self.height - 100
-            except:
+            except Exception:
                 # Fallback position
                 self.x = self.x or 1000
                 self.y = self.y or 400
@@ -117,14 +119,31 @@ class DesktopCompanion:
         print("[Desktop Companion] Ready!")
         
         # Start the webview - try without specifying gui to let it pick best option
-        webview.start(debug=False)
+        try:
+            webview.start(debug=False)
+        finally:
+            self.stop()
     
     def stop(self):
         """Stop the desktop companion"""
         if self.window:
-            self.window.destroy()
+            with contextlib.suppress(Exception):
+                self.window.destroy()
+            self.window = None
+
+        if self.loop and self.server_runner:
+            cleanup_future = asyncio.run_coroutine_threadsafe(self.server_runner.cleanup(), self.loop)
+            with contextlib.suppress(Exception):
+                cleanup_future.result(timeout=5)
+            self.server_runner = None
+
         if self.loop:
             self.loop.call_soon_threadsafe(self.loop.stop)
+            self.loop = None
+
+        if self.server_thread and self.server_thread.is_alive():
+            self.server_thread.join(timeout=5)
+        self.server_thread = None
 
 
 def main():

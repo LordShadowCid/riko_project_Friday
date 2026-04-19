@@ -18,6 +18,8 @@ namespace Annabeth.UI
         private Toggle _toggleAlwaysOnTop;
         private Slider _sliderAvatarSize;
         private Text _labelAvatarSize;
+        private Slider _sliderCharacterOpacity;
+        private Text _labelCharacterOpacity;
         private Slider _sliderGraphicsQuality;
         private Text _labelGraphicsQuality;
         private Text _labelCurrentModel;
@@ -69,11 +71,21 @@ namespace Annabeth.UI
         private Toggle _toggleMinimizeToTray;
         private Toggle _toggleStartWithWindows;
 
+        // Theme (v5)
+        private Slider _sliderHueShift;
+        private Text _labelHueShift;
+        private Slider _sliderSaturation;
+        private Text _labelSaturation;
+
+        // IK (v5)
+        private Toggle _toggleIK;
+
         private Button _btnResetDefaults;
         private Button _btnClose;
 
         private RadialMenu _radialMenu;
         private bool _loading;
+        private bool _settingsDirty;
 
         /// <summary>Called by RadialMenu after AddComponent.</summary>
         public void SetRadialMenu(RadialMenu menu) => _radialMenu = menu;
@@ -94,7 +106,31 @@ namespace Annabeth.UI
             UnwireListeners();
         }
 
+        private void OnDestroy()
+        {
+            UnwireListeners();
+            // Flush any pending save on destroy
+            if (_settingsDirty) FlushSaveAndApply();
+        }
+
+        private void LateUpdate()
+        {
+            if (!_settingsDirty) return;
+            _settingsDirty = false;
+            FlushSaveAndApply();
+        }
+
+        private void FlushSaveAndApply()
+        {
+            var sm = Core.SettingsManager.Instance;
+            if (sm == null) return;
+            sm.SaveAll();
+            sm.ApplyAllSettings();
+        }
+
         // ── Build ───────────────────────────────────────────────
+
+        private Button _btnCloseTop;
 
         private void BuildUI()
         {
@@ -104,12 +140,31 @@ namespace Annabeth.UI
             _panelRect.anchorMax = new Vector2(0.5f, 0.5f);
             _panelRect.anchoredPosition = Vector2.zero;
 
-            // Scroll view fills the panel
-            var (_, content) = UIFactory.CreateScrollView(_panelRect, panelSize - new Vector2(8, 60));
+            // ── Title bar with close button (always visible, outside scroll) ──
+            var titleLabel = UIFactory.CreateLabel(_panelRect, "SettingsTitle", "Settings",
+                new Vector2(380, 32), 18);
+            titleLabel.fontStyle = FontStyle.Bold;
+            titleLabel.alignment = TextAnchor.MiddleCenter;
+            var titleRt = titleLabel.GetComponent<RectTransform>();
+            titleRt.anchorMin = new Vector2(0, 1);
+            titleRt.anchorMax = new Vector2(1, 1);
+            titleRt.pivot = new Vector2(0.5f, 1);
+            titleRt.sizeDelta = new Vector2(0, 32);
+            titleRt.anchoredPosition = new Vector2(0, -4);
+
+            _btnCloseTop = UIFactory.CreateButton(_panelRect, "BtnCloseX", "X", new Vector2(30, 30), 16);
+            var closeBtnRt = _btnCloseTop.GetComponent<RectTransform>();
+            closeBtnRt.anchorMin = new Vector2(1, 1);
+            closeBtnRt.anchorMax = new Vector2(1, 1);
+            closeBtnRt.pivot = new Vector2(1, 1);
+            closeBtnRt.anchoredPosition = new Vector2(-6, -5);
+
+            // Scroll view fills the panel below the title bar
+            var (_, content) = UIFactory.CreateScrollView(_panelRect, panelSize - new Vector2(8, 90));
             var svRt = content.parent.parent.GetComponent<RectTransform>();
             svRt.anchorMin = new Vector2(0.5f, 0.5f);
             svRt.anchorMax = new Vector2(0.5f, 0.5f);
-            svRt.anchoredPosition = new Vector2(0, 18);
+            svRt.anchoredPosition = new Vector2(0, -2);
 
             var rowSize = new Vector2(380, 28);
             var toggleSize = new Vector2(380, 26);
@@ -119,6 +174,7 @@ namespace Annabeth.UI
             (_sliderFPS, _labelFPS) = UIFactory.CreateSliderRow(content, "FPS", "FPS Limit", 15, 165, true, rowSize);
             _toggleAlwaysOnTop = UIFactory.CreateToggle(content, "AlwaysOnTop", "Always On Top", toggleSize);
             (_sliderAvatarSize, _labelAvatarSize) = UIFactory.CreateSliderRow(content, "AvatarSize", "Avatar Size", 0.5f, 2f, false, rowSize);
+            (_sliderCharacterOpacity, _labelCharacterOpacity) = UIFactory.CreateSliderRow(content, "CharOpacity", "Character Opacity", 0.1f, 1f, false, rowSize);
             (_sliderGraphicsQuality, _labelGraphicsQuality) = UIFactory.CreateSliderRow(content, "GfxQuality", "Graphics Quality", 0, 2, true, rowSize);
 
             // Current model info (Feature #14)
@@ -172,6 +228,19 @@ namespace Annabeth.UI
 
             UIFactory.CreateSeparator(content, rowSize.x);
 
+            // ── Theme ───────────────
+            UIFactory.CreateSectionHeader(content, "Theme", rowSize);
+            (_sliderHueShift, _labelHueShift) = UIFactory.CreateSliderRow(content, "HueShift", "UI Hue Shift", 0f, 360f, true, rowSize);
+            (_sliderSaturation, _labelSaturation) = UIFactory.CreateSliderRow(content, "Saturation", "UI Saturation", 0f, 2f, false, rowSize);
+
+            UIFactory.CreateSeparator(content, rowSize.x);
+
+            // ── IK ──────────────────
+            UIFactory.CreateSectionHeader(content, "Inverse Kinematics", rowSize);
+            _toggleIK = UIFactory.CreateToggle(content, "EnableIK", "Enable IK (Sit/Drag Poses)", toggleSize);
+
+            UIFactory.CreateSeparator(content, rowSize.x);
+
             // ── System ──────────────
             UIFactory.CreateSectionHeader(content, "System", rowSize);
             _toggleSleepMode = UIFactory.CreateToggle(content, "SleepMode", "Sleep Mode", toggleSize);
@@ -195,6 +264,7 @@ namespace Annabeth.UI
             _sliderFPS?.onValueChanged.AddListener(OnFPSChanged);
             _toggleAlwaysOnTop?.onValueChanged.AddListener(OnAlwaysOnTopChanged);
             _sliderAvatarSize?.onValueChanged.AddListener(OnAvatarSizeChanged);
+            _sliderCharacterOpacity?.onValueChanged.AddListener(OnCharacterOpacityChanged);
             _sliderGraphicsQuality?.onValueChanged.AddListener(OnGraphicsQualityChanged);
 
             _toggleMouseTracking?.onValueChanged.AddListener(OnMouseTrackingChanged);
@@ -226,8 +296,13 @@ namespace Annabeth.UI
             _toggleMinimizeToTray?.onValueChanged.AddListener(OnMinimizeToTrayChanged);
             _toggleStartWithWindows?.onValueChanged.AddListener(OnStartWithWindowsChanged);
 
+            _sliderHueShift?.onValueChanged.AddListener(OnHueShiftChanged);
+            _sliderSaturation?.onValueChanged.AddListener(OnSaturationChanged);
+            _toggleIK?.onValueChanged.AddListener(OnIKChanged);
+
             _btnResetDefaults?.onClick.AddListener(OnResetDefaults);
             _btnClose?.onClick.AddListener(OnClose);
+            _btnCloseTop?.onClick.AddListener(OnClose);
         }
 
         private void UnwireListeners()
@@ -235,6 +310,7 @@ namespace Annabeth.UI
             _sliderFPS?.onValueChanged.RemoveListener(OnFPSChanged);
             _toggleAlwaysOnTop?.onValueChanged.RemoveListener(OnAlwaysOnTopChanged);
             _sliderAvatarSize?.onValueChanged.RemoveListener(OnAvatarSizeChanged);
+            _sliderCharacterOpacity?.onValueChanged.RemoveListener(OnCharacterOpacityChanged);
             _sliderGraphicsQuality?.onValueChanged.RemoveListener(OnGraphicsQualityChanged);
 
             _toggleMouseTracking?.onValueChanged.RemoveListener(OnMouseTrackingChanged);
@@ -266,8 +342,13 @@ namespace Annabeth.UI
             _toggleMinimizeToTray?.onValueChanged.RemoveListener(OnMinimizeToTrayChanged);
             _toggleStartWithWindows?.onValueChanged.RemoveListener(OnStartWithWindowsChanged);
 
+            _sliderHueShift?.onValueChanged.RemoveListener(OnHueShiftChanged);
+            _sliderSaturation?.onValueChanged.RemoveListener(OnSaturationChanged);
+            _toggleIK?.onValueChanged.RemoveListener(OnIKChanged);
+
             _btnResetDefaults?.onClick.RemoveListener(OnResetDefaults);
             _btnClose?.onClick.RemoveListener(OnClose);
+            _btnCloseTop?.onClick.RemoveListener(OnClose);
         }
 
         // ── Load / Apply ────────────────────────────────────────
@@ -286,6 +367,8 @@ namespace Annabeth.UI
             _toggleAlwaysOnTop?.SetIsOnWithoutNotify(d.alwaysOnTop);
             _sliderAvatarSize?.SetValueWithoutNotify(d.avatarSize);
             UpdateLabel(_labelAvatarSize, $"{d.avatarSize:F1}x");
+            _sliderCharacterOpacity?.SetValueWithoutNotify(d.characterOpacity);
+            UpdateLabel(_labelCharacterOpacity, $"{d.characterOpacity:P0}");
             _sliderGraphicsQuality?.SetValueWithoutNotify(d.graphicsQuality);
             string[] qualityNames = { "Low", "Medium", "High" };
             UpdateLabel(_labelGraphicsQuality, qualityNames[Mathf.Clamp(d.graphicsQuality, 0, 2)]);
@@ -339,6 +422,15 @@ namespace Annabeth.UI
             _toggleMinimizeToTray?.SetIsOnWithoutNotify(d.minimizeToTray);
             _toggleStartWithWindows?.SetIsOnWithoutNotify(d.startWithWindows);
 
+            // Theme (v5)
+            _sliderHueShift?.SetValueWithoutNotify(d.uiHueShift);
+            UpdateLabel(_labelHueShift, $"{d.uiHueShift:F0}°");
+            _sliderSaturation?.SetValueWithoutNotify(d.uiSaturation);
+            UpdateLabel(_labelSaturation, $"{d.uiSaturation:F2}x");
+
+            // IK (v5)
+            _toggleIK?.SetIsOnWithoutNotify(d.enableIK);
+
             _loading = false;
         }
 
@@ -365,6 +457,14 @@ namespace Annabeth.UI
             if (_loading) return;
             Data.avatarSize = val;
             UpdateLabel(_labelAvatarSize, $"{val:F1}x");
+            SaveAndApply();
+        }
+
+        private void OnCharacterOpacityChanged(float val)
+        {
+            if (_loading) return;
+            Data.characterOpacity = val;
+            UpdateLabel(_labelCharacterOpacity, $"{val:P0}");
             SaveAndApply();
         }
 
@@ -511,6 +611,29 @@ namespace Annabeth.UI
             SaveAndApply();
         }
 
+        private void OnHueShiftChanged(float val)
+        {
+            if (_loading) return;
+            Data.uiHueShift = val;
+            UpdateLabel(_labelHueShift, $"{val:F0}°");
+            SaveAndApply();
+        }
+
+        private void OnSaturationChanged(float val)
+        {
+            if (_loading) return;
+            Data.uiSaturation = val;
+            UpdateLabel(_labelSaturation, $"{val:F2}x");
+            SaveAndApply();
+        }
+
+        private void OnIKChanged(bool val)
+        {
+            if (_loading) return;
+            Data.enableIK = val;
+            SaveAndApply();
+        }
+
         private void OnGraphicsQualityChanged(float val)
         {
             if (_loading) return;
@@ -569,14 +692,18 @@ namespace Annabeth.UI
 
         // ── Helpers ─────────────────────────────────────────────
 
-        private Core.SettingsData Data => Core.SettingsManager.Instance.data;
+        private Core.SettingsData Data
+        {
+            get
+            {
+                var inst = Core.SettingsManager.Instance;
+                return inst != null ? inst.data : null;
+            }
+        }
 
         private void SaveAndApply()
         {
-            var sm = Core.SettingsManager.Instance;
-            if (sm == null) return;
-            sm.SaveAll();
-            sm.ApplyAllSettings();
+            _settingsDirty = true;
         }
 
         private static void UpdateLabel(Text label, string text)

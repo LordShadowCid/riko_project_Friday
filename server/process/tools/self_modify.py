@@ -24,6 +24,10 @@ CHECK_INTERVAL_SEC = 600
 # Minimum evals needed before adjusting
 MIN_EVALS = 5
 
+# Thresholds for self-modification decisions
+_INTERRUPT_RATE_HIGH = 0.30   # interrupt_rate above this → verbosity too high
+_SCORE_LOW_THRESHOLD = 3.5    # avg score below this → trait needs adjustment
+
 
 def _load_personality() -> dict:
     if os.path.exists(PERSONALITY_FILE):
@@ -34,8 +38,20 @@ def _load_personality() -> dict:
 
 def _save_personality(p: dict):
     os.makedirs(os.path.dirname(PERSONALITY_FILE), exist_ok=True)
-    with open(PERSONALITY_FILE, "w", encoding="utf-8") as f:
-        f.write(json.dumps(p, indent=2))
+    import tempfile
+    tmp_fd, tmp_path = tempfile.mkstemp(
+        dir=os.path.dirname(PERSONALITY_FILE), suffix=".tmp"
+    )
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(p, indent=2))
+        os.replace(tmp_path, PERSONALITY_FILE)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def self_modify_check():
@@ -64,25 +80,27 @@ def self_modify_check():
 
     # Too many interruptions -> responses probably too long
     interruption_rate = summary["interruptions"] / max(summary["total_turns"], 1)
-    if interruption_rate > 0.3 and p.get("verbosity", 3) > 1:
+    if interruption_rate > _INTERRUPT_RATE_HIGH and p.get("verbosity", 3) > 1:
         p["verbosity"] = max(1, p.get("verbosity", 3) - 1)
         changed = True
         print(f"[SelfMod] High interruption rate ({interruption_rate:.0%}) -> verbosity decreased to {p['verbosity']}")
 
     # Low helpfulness -> try being more detailed
-    if summary["avg_helpfulness"] < 3.5 and p.get("verbosity", 3) < 5:
+    if summary["avg_helpfulness"] < _SCORE_LOW_THRESHOLD and p.get("verbosity", 3) < 5:
         p["verbosity"] = min(5, p.get("verbosity", 3) + 1)
         changed = True
         print(f"[SelfMod] Low helpfulness ({summary['avg_helpfulness']}) -> verbosity increased to {p['verbosity']}")
 
     # Low appropriate_length -> adjust verbosity (usually means too long)
-    if summary["avg_appropriate_length"] < 3.5 and p.get("verbosity", 3) > 1:
+    # Skip if helpfulness is ALSO low — the two adjustments would cancel out,
+    # and helpfulness matters more for user satisfaction.
+    elif summary["avg_appropriate_length"] < _SCORE_LOW_THRESHOLD and p.get("verbosity", 3) > 1:
         p["verbosity"] = max(1, p.get("verbosity", 3) - 1)
         changed = True
         print(f"[SelfMod] Low length score ({summary['avg_appropriate_length']}) -> verbosity decreased to {p['verbosity']}")
 
     # Low in-character -> boost snarkiness back up
-    if summary["avg_in_character"] < 3.5 and p.get("snarkiness", 4) < 5:
+    if summary["avg_in_character"] < _SCORE_LOW_THRESHOLD and p.get("snarkiness", 4) < 5:
         p["snarkiness"] = min(5, p.get("snarkiness", 4) + 1)
         changed = True
         print(f"[SelfMod] Low in-character ({summary['avg_in_character']}) -> snarkiness increased to {p['snarkiness']}")
@@ -92,3 +110,14 @@ def self_modify_check():
         print(f"[SelfMod] Personality updated: {p}")
     else:
         print(f"[SelfMod] Scores OK — no adjustments (h={summary['avg_helpfulness']}, c={summary['avg_in_character']}, l={summary['avg_appropriate_length']})")
+
+    # Phase 8 — code improvement proposals (no-op when disabled)
+    try:
+        from server.process.tools.proposal_generator import get_proposal_generator
+        gen = get_proposal_generator()
+        if gen is not None:
+            added = gen.run()
+            if added:
+                print(f"[SelfMod] {added} new code improvement proposal(s) written to proposals.json")
+    except Exception as e:
+        print(f"[SelfMod] Proposal scan failed (non-critical): {e}")

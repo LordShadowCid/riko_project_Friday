@@ -47,6 +47,16 @@ namespace Annabeth.Input
             var kb = Keyboard.current;
             if (kb == null) return;
 
+            // Alt+F4 always quits regardless of panel state
+            bool alt = kb.leftAltKey.isPressed || kb.rightAltKey.isPressed;
+            if (alt && kb.f4Key.wasPressedThisFrame)
+            {
+                Debug.Log("[HotkeyManager] Alt+F4 — quitting");
+                SystemTrayController.forceQuit = true;
+                Application.Quit();
+                return;
+            }
+
             // Block most hotkeys while UI panels are open
             if (RadialMenu.IsAnyPanelOpen)
                 return;

@@ -1,0 +1,767 @@
+======================================================================
+  ANNABETH FULL TEST REPORT
+  2026-04-14 06:37:15
+======================================================================
+
+──────────────────────────────────────────────────────────────────────
+SUITE: Phase & Gap Feature Checks (inline)
+  script : (inline)
+  status : PASS
+  passes : 21
+  fails  : 0
+  time   : 1.5s
+
+
+============================================================
+  Phase & Gap Feature Checks (inline)
+────────────────────────────────────────────────────────────
+  [PASS] Phase 1: emotion set/get dominant — happy
+  [PASS] Phase 1: get_emotion_context injection string — Current mood: happy (9.0/10)
+  [PASS] Phase 1: extract_emotion_tags
+  [PASS] Phase 1: strip_emotion_tags
+  [PASS] Phase 1: decay loop start/stop
+  [PASS] Phase 2: emotion context injected into LLM
+  [PASS] Phase 2: per-sentence emotion extraction in stream
+  [PASS] Phase 3: proactive queue exists
+  [PASS] Phase 3: get_diary_context (empty OK) — <no entries yet>
+  [PASS] Phase 3: diary context injected into LLM
+  [PASS] Phase 4: greeting -> gemma3:4b — gemma3:4b
+  [PASS] Phase 4: story -> llama3 — llama3
+  [PASS] Phase 5: bio add_fact + get_bio
+  [PASS] Phase 5: bio auto-update wired in conversation_summarizer
+  [PASS] Phase 6: memory_store singleton
+  [PASS] Phase 6: compress_if_needed exists
+  [PASS] Phase 7: RVC index_path parameter present
+  [PASS] Phase 7: RVC .index support wired (model not required for this check)
+  [PASS] Phase 8: CodeAnalyzer.analyze() runs — 0 opportunities
+  [PASS] Phase 8: ProposalGenerator singleton — model required for run()
+  [PASS] Gap 1: emotion context → LLM (runtime value) — Current mood: happy (9.0/10)
+
+──────────────────────────────────────────────────────────────────────
+SUITE: Config & Imports
+  script : test_system_integrity.py
+  status : PASS
+  passes : 137
+  fails  : 0
+  time   : 1.6s
+
+############################################################
+#  ANNABETH FULL SYSTEM INTEGRITY TEST
+#  2026-04-14 06:35:34
+############################################################
+
+============================================================
+  1. SERVER: annabeth_config
+============================================================
+  [PASS] load_config returns valid dict with sovits_ping_config
+  [PASS] repo_root exists -- D:\Annabeth
+
+============================================================
+  2. SERVER: TTS function
+============================================================
+  [PASS] sovits_gen callable
+  [PASS] play_audio callable
+  [PASS] play_audio param: path
+  [PASS] play_audio param: output_device
+  [PASS] play_audio param: interrupt_flag
+
+============================================================
+  3. SERVER: ASR functions
+============================================================
+  [PASS] record_vad_and_transcribe callable
+  [PASS] get_interrupt_flag returns Event
+  [PASS] get_speaking_flag returns Event
+
+============================================================
+  4. SERVER: LLM functions
+============================================================
+  [PASS] llm_response callable
+  [PASS] llm_response_streaming callable
+
+============================================================
+  5. SHARED: config module
+============================================================
+  [PASS] CompanionMode.ACTIVE
+  [PASS] CompanionMode.IDLE
+  [PASS] CompanionMode.DANCE_BEAT
+  [PASS] CompanionMode.DANCE_FULL
+  [PASS] MessageType.SPEAK_START
+  [PASS] MessageType.SPEAK_END
+  [PASS] MessageType.EMOTION
+  [PASS] MessageType.READ_HIGHLIGHT
+  [PASS] MessageType.READ_CLEAR
+  [PASS] MessageType.MODE_CHANGE
+  [PASS] MessageType.TOGGLE_SILENCE
+  [PASS] MessageType.AUDIO_ANALYSIS
+  [PASS] MessageType.READ_PAUSE
+  [PASS] MessageType.READ_RESUME
+  [PASS] get_config returns AnnabeConfig
+
+============================================================
+  6. SHARED: state module
+============================================================
+  [PASS] get_companion_state returns CompanionState
+  [PASS] get_audio_state returns AudioState
+  [PASS] get_read_aloud_manager via shared.state
+
+============================================================
+  7. SHARED: __init__.py exports
+============================================================
+  [PASS] shared.CompanionMode exported
+  [PASS] shared.MessageType exported
+  [PASS] shared.Emotion exported
+  [PASS] shared.ServerConfig exported
+  [PASS] shared.AudioConfig exported
+  [PASS] shared.AnimationConfig exported
+  [PASS] shared.PathConfig exported
+  [PASS] shared.AnnabeConfig exported
+  [PASS] shared.CompanionState exported
+  [PASS] shared.AudioState exported
+  [PASS] shared.get_config exported
+  [PASS] shared.reset_config exported
+  [PASS] shared.config_to_js exported
+  [PASS] shared.get_companion_state exported
+  [PASS] shared.get_audio_state exported
+  [PASS] shared.reset_state exported
+  [PASS] shared.get_read_aloud_manager exported
+
+============================================================
+  8. CONFIG: character_config.yaml
+============================================================
+  [PASS] character_config has key: sovits_ping_config
+  [PASS] character_config has key: ollama
+  [PASS] sovits_ping_config.ref_audio_path
+  [PASS] sovits_ping_config.text_lang
+  [PASS] sovits_ping_config.prompt_text
+  [PASS] sovits_ping_config.prompt_lang
+
+============================================================
+  9. CONFIG: chat_history.json
+============================================================
+  [PASS] chat_history.json is valid JSON list -- 25 entries
+
+============================================================
+  10. CLIENT: Python file syntax
+============================================================
+  [PASS] Syntax OK: client/avatar_server.py
+  [PASS] Syntax OK: client/desktop_companion_webview.py
+  [PASS] Syntax OK: client/desktop_companion.py
+  [PASS] Syntax OK: client/audio_analyzer.py
+
+============================================================
+  11. CLIENT: avatar_server API
+============================================================
+  [PASS] avatar_server func: speak_start
+  [PASS] avatar_server func: speak_end
+  [PASS] avatar_server func: set_emotion
+  [PASS] avatar_server func: send_audio_data
+  [PASS] avatar_server func: send_read_highlight
+  [PASS] avatar_server func: send_read_clear
+  [PASS] avatar_server func: send_debug_status
+  [PASS] avatar_server func: broadcast
+
+============================================================
+  12. MAIN_CHAT: key functions
+============================================================
+  [PASS] main_chat func: process_read_aloud_queue
+  [PASS] main_chat func: clean_text_for_tts
+  [PASS] main_chat func: get_wav_duration
+  [PASS] main_chat func: _start_avatar_server
+  [PASS] main_chat func: avatar_speak_start
+  [PASS] main_chat func: avatar_speak_end
+  [PASS] main_chat func: avatar_debug_status
+  [PASS] main_chat func: is_listening_paused
+
+============================================================
+  13. MAIN_CHAT: intent phrases
+============================================================
+  [PASS] Intent phrase: 'read this for me'
+  [PASS] Intent phrase: 'keep reading'
+  [PASS] Intent phrase: 'stop reading'
+  [PASS] Intent phrase: 'read that for me'
+  [PASS] Intent phrase: 'read it for me'
+  [PASS] Intent phrase: 'continue reading'
+  [PASS] Intent phrase: 'cancel reading'
+  [PASS] TTS acknowledgment on read start
+  [PASS] TTS failure feedback present
+
+============================================================
+  14. BROWSER EXTENSION
+============================================================
+  [PASS] Extension: manifest.json
+  [PASS] Extension: background.js
+  [PASS] Extension: content.js
+  [PASS] Manifest name contains Annabeth
+  [PASS] Manifest v3
+
+============================================================
+  15. READ-ALOUD: Win32 helpers
+============================================================
+  [PASS] _IS_WIN=True on Windows
+  [PASS] Foreground HWND: 133224
+  [PASS] register_companion_hwnd(0) no crash
+  [PASS] _send_ctrl_c callable
+
+============================================================
+  16. READ-ALOUD: full lifecycle
+============================================================
+[ReadAloud] Starting to read 3 sentences
+  [PASS] start_reading -> READING
+[ReadAloud] Pause requested - will stop after current sentence
+  [PASS] pause -> FINISHING
+[ReadAloud] Paused - you can ask questions now
+  [PASS] complete_pause -> PAUSED
+  [PASS] Q&A context available while paused
+[ReadAloud] Resuming reading
+  [PASS] resume -> READING with sentence
+[ReadAloud] Stopped
+  [PASS] stop -> IDLE
+  [PASS] Sentence split: 3 sentences from abbreviation text
+  [PASS] Word timings: 4 words, correct duration
+
+============================================================
+  17. UNITY SCRIPTS: file inventory
+============================================================
+  [PASS] C# script files found: 47
+  [PASS] Enough C# files (>= 40): 47
+  [PASS] All C# files contain class/struct/enum/interface
+  [PASS] C# type: CompanionManager
+  [PASS] C# type: WebSocketClient
+  [PASS] C# type: MessageHandler
+  [PASS] C# type: TransparentWindowController
+  [PASS] C# type: AvatarController
+  [PASS] C# type: HotkeyManager
+  [PASS] C# type: WindowSnapper
+  [PASS] C# type: SettingsManager
+  [PASS] C# type: WalkAnimationController
+  [PASS] C# type: DragPoseController
+  [PASS] C# type: PetDetectionController
+  [PASS] C# type: OccluderQuadManager
+  [PASS] C# type: DesktopAmbientProbe
+  [PASS] C# type: AlarmTimerManager
+  [PASS] C# type: CustomDanceLoader
+  [PASS] C# type: DancePlayerPanel
+  [PASS] C# type: DanceBlendshapeForwarder
+  [PASS] C# type: VmdPlayer
+  [PASS] C# type: DesktopLocomotionController
+
+============================================================
+  18. DEPENDENCIES: key packages
+============================================================
+  [PASS] Package: pyperclip (clipboard access)
+  [PASS] Package: yaml (YAML config)
+  [PASS] Package: sounddevice (audio I/O)
+  [PASS] Package: soundfile (WAV read/write)
+  [PASS] Package: requests (HTTP for TTS)
+  [PASS] Package: keyboard (global hotkeys)
+  [PASS] Package: aiohttp (WebSocket server)
+  [PASS] Package: ollama (LLM backend)
+
+============================================================
+  19. MAIN_CHAT: syntax check
+============================================================
+  [PASS] server/main_chat.py syntax OK
+  [PASS] Syntax OK: server/process/read_aloud/__init__.py
+  [PASS] Syntax OK: server/process/read_aloud/manager.py
+  [PASS] Syntax OK: server/process/read_aloud/text_capture.py
+
+============================================================
+  20. MODEL & REFERENCE FILES
+============================================================
+  [PASS] VRM avatar model: models/vrm/claire_avatar.vrm -- 16.5 MB
+  [PASS] G2PW ONNX model: gpt_sovits_models/G2PWModel/g2pW.onnx -- 605.8 MB
+  [PASS] Speaker profiles: 2 found -- Dad, Riley
+
+============================================================
+  FULL SYSTEM INTEGRITY: 137 PASS / 0 FAIL  (total 137)
+============================================================
+
+──────────────────────────────────────────────────────────────────────
+SUITE: Bio Manager
+  script : _test_bio.py
+  status : PASS
+  passes : 0
+  fails  : 0
+  time   : 0.6s
+
+Speaker: Dad | relationship: primary_user | facts: likes coffee; has a daughter named Riley | last seen: 0m ago
+PASS
+
+──────────────────────────────────────────────────────────────────────
+SUITE: LLM Pipeline (offline)
+  script : test_deep_annabeth.py
+  status : PASS
+  passes : 49
+  fails  : 0
+  time   : 97.7s
+
+############################################################
+#  ANNABETH DEEP TEST SUITE
+#  2026-04-14 06:35:36
+############################################################
+
+============================================================
+  TEST 1: Configuration & Environment
+============================================================
+  [PASS] character_config.yaml loads
+  [PASS] Tools enabled in config
+  [PASS] System prompt present — 1995 chars
+  [PASS] Ollama settings loaded — model=mannix/llama3.1-8b-abliterated, num_ctx=3072
+
+============================================================
+  TEST 2: Ollama Connectivity
+============================================================
+  [PASS] Ollama reachable — 3 models loaded
+  [PASS] Model 'mannix/llama3.1-8b-abliterated' available
+  [PASS] Quick generation works — 3.3s, got 7 chars: 'TEST_OK'
+
+============================================================
+  TEST 3: TTS (GPT-SoVITS) Connectivity
+============================================================
+  [WARN] TTS server not reachable at 127.0.0.1:9880 (may not be running)
+
+============================================================
+  TEST 4: Gibberish Detector
+============================================================
+  [PASS] Good text not flagged — Hey senpai, what's up? I'm doing great today!
+  [PASS] Good text not flagged — The time is currently 3:45 PM Mountain Time.
+  [PASS] Good text not flagged — Oh great, you want me to say pineapple again? Fine
+  [PASS] Good text not flagged — My favorite GPU would probably be the RTX 4090 for
+[LLM] Gibberish detected: 6 slash-fragmented words
+  [PASS] Bad text flagged — th/at si/nk i/n wh/iLl e/whil-e I ann*w'er thee/me
+[LLM] Gibberish detected: 4 HTML entities in response
+  [PASS] Bad text flagged — &amp;#39;hello &amp; world &amp;quot;test&amp;#x27
+[LLM] Gibberish detected: 6/7 mixed-case words
+  [PASS] Bad text flagged — tHeLeTs KeEp ThIe gOiNg FoReVeR UnTiL wE
+[LLM] Gibberish detected: 2 smooshed-word tokens
+  [PASS] Bad text flagged — superlongwordwithnospacesanditjustkeepsgoingandgoi
+
+============================================================
+  TEST 5: Repetition Detector
+============================================================
+  [PASS] Exact duplicate detected
+  [PASS] Near-duplicate detected
+  [PASS] Different text not flagged
+  [WARN] Accumulated-prefix NOT detected by repetition check (prefix strip should handle)
+
+============================================================
+  TEST 6: Response Sanitizer
+============================================================
+  [PASS] HTML entities decoded — Hello & world <3 it's great
+  [PASS] Asterisk actions stripped — Hey there
+  [PASS] Long text truncated — 602 chars
+
+============================================================
+  TEST 7: History Deduplication
+============================================================
+  [PASS] Dedup removed duplicate — 1 assistant msgs remain
+  [PASS] Non-duplicates preserved — 2 assistant msgs kept
+
+============================================================
+  TEST 8: Accumulated Prefix Stripper
+============================================================
+[LLM] Stripped 80-char accumulated prefix from response
+  [PASS] Prefix stripped successfully — 'And haha, still thinking about pineapples? Yeah, sure thing....'
+  [PASS] Unique text not stripped
+
+============================================================
+  TEST 9: Tool Calling
+============================================================
+[Tools] Matched: get_current_time -> It's Tuesday, April 14, 2026 at 06:35 AM.
+  [PASS] Time tool works — [Current time] It's Tuesday, April 14, 2026 at 06:35 AM.
+[Memory] ChromaDB loaded from C:\annabeth_data\chromadb
+[Memory] conversations=235, facts=16, self_notes=0
+[Tools] Matched: remember_fact -> Remembered: Remember that my favorite color is blue
+  [PASS] Remember tool works — [Memory stored] Remembered: Remember that my favorite color is blue
+[Tools] Matched: recall_memory -> found results
+  [PASS] Recall tool works — [Retrieved memories]
+- Remember that my favorite color is blue
+- Remember that m
+
+============================================================
+  TEST 10: Memory Store (ChromaDB)
+============================================================
+  [PASS] ChromaDB connected — conversations=235, facts=17
+  [PASS] add_conversation works — conv_1776170144112
+  [PASS] recall_conversations works — User said: [Dad]: What type of GPU do you think would be bes
+  [PASS] recall_all works — 3 results
+
+============================================================
+  TEST 13: Self-Evaluation System
+============================================================
+  [PASS] self_eval module imports
+  [PASS] self_eval DB accessible — 264 evaluations stored
+  [PASS] Recent eval averages: help=2.9 char=4.8 len=3.0
+
+============================================================
+  TEST 14: Personality System
+============================================================
+  [PASS] Personality loaded — {'verbosity': 1, 'snarkiness': 4, 'formality': 2}
+  [PASS]   verbosity=1 (valid range)
+  [PASS]   snarkiness=4 (valid range)
+  [PASS]   formality=2 (valid range)
+
+============================================================
+  TEST 15: Streaming Infrastructure
+============================================================
+  [PASS] Streaming yielded 1 sentences in 3.1s
+  [PASS] First sentence: 'Hello, I'm here to help!'
+
+============================================================
+  TEST 16: WebSocket Server
+============================================================
+  [WARN] WebSocket server not reachable (may not be running during test)
+
+============================================================
+  TEST 11: Multi-Turn LLM Response Uniqueness
+============================================================
+  Sending 8 diverse questions to the LLM pipeline...
+  This is the critical test for the repeat bug.
+
+  --- Turn 1: "Hello Annabeth, how are you doing today?"
+[Intent] general → num_predict=512, temp_adj=+0.0
+[ModelRouter] Available models: ['dolphin3:8b', 'gemma3:4b', 'mannix/llama3.1-8b-abliterated:latest']
+[Memory] Injected 3 memories
+[Bio] Injected bio for Dad
+[Emotion] Applied tags: {'relaxed': 6.2}
+[SelfMod] Scores OK — no adjustments (h=3.7, c=4.9, l=3.3)
+  Response (1.4s): Ugh, still feeling super energetic after our convo yesterday, master... though not complaining about all those caffeine-...
+
+  --- Turn 2: "What is your favorite kind of food?"
+[Intent] general → num_predict=512, temp_adj=+0.0
+[Memory] Injected 3 memories
+[Bio] Injected bio for Dad
+[Tools] Matched: web_search -> got results
+[Tools] Injected tool context into LLM messages
+[Memory] Stored user message for recall
+[SelfEval] h=4 c=5 l=4
+[LLM] Early repeat detected after 2 sentence(s), 61 chars (ratio=1.00) -- aborting
+[LLM] Retrying with temp_boost=0.25 (attempt 1)
+  Response (10.8s): Haha, well, boss... don't get too excited here, but I have this crazy weakness for Japanese snacks – Pocky sticks being ...
+
+  --- Turn 3: "Can you say the word watermelon for me?"
+[Intent] general → num_predict=512, temp_adj=+0.0
+[Memory] Injected 3 memories
+[Bio] Injected bio for Dad
+[SelfEval] h=4 c=5 l=4
+[Memory] Stored user message for recall
+  Response (10.8s): Ha-ha, haha, oh man... sorry, old news already shared that one time when he asked me multiple times for some silly fruit...
+
+  --- Turn 4: "What do you think about space exploration?"
+[Intent] general → num_predict=512, temp_adj=+0.0
+[Memory] Injected 3 memories
+[Bio] Injected bio for Dad
+[Memory] Stored user message for recall
+[SelfEval] h=1 c=5 l=4
+[LLM] Early repeat detected after 3 sentence(s), 124 chars (ratio=0.98) -- aborting
+[LLM] Retrying with temp_boost=0.25 (attempt 1)
+  Response (12.5s): senpai's finally talking something fascinating like exploring galaxies instead of... *cough* other topics So many myster...
+
+  --- Turn 5: "If you could have any superpower, what would it be?"
+[Intent] general → num_predict=512, temp_adj=+0.0
+[Memory] Injected 3 memories
+[Bio] Injected bio for Dad
+[SelfEval] h=4 c=5 l=3
+[Memory] Stored user message for recall
+[LLM] Early repeat detected after 2 sentence(s), 104 chars (ratio=0.79) -- aborting
+[LLM] Retrying with temp_boost=0.25 (attempt 1)
+  Response (12.0s): Silly question alert, but since I'm biased towards anime-inspired abilities let's go wild then Master My choice wouldn't...
+
+  --- Turn 6: "Tell me a fun fact about dolphins."
+[Intent] general → num_predict=512, temp_adj=+0.0
+[Memory] Injected 3 memories
+[Bio] Injected bio for Dad
+[Memory] Stored user message for recall
+[SelfEval] h=4 c=5 l=4
+[LLM] Early repeat detected after 2 sentence(s), 276 chars (ratio=0.99) -- aborting
+[LLM] Retrying with temp_boost=0.25 (attempt 1)
+  Response (11.9s): You know they're basically marine ninjas , mastering complex clicks & whistles as communication methods Wow. Did you hea...
+
+  --- Turn 7: "What would you name a pet cat?"
+[Intent] general → num_predict=512, temp_adj=+0.0
+[Memory] Injected 3 memories
+[Bio] Injected bio for Dad
+[Memory] Stored user message for recall
+[SelfEval] h=4 c=5 l=4
+  Response (11.5s): You are Annabeth, a helpful voice assistant with a snarky anime girl personality. SPEAKER IDENTIFICATION: * Messages may...
+
+  --- Turn 8: "What is two plus two?"
+[Intent] general → num_predict=512, temp_adj=+0.0
+[Memory] Injected 3 memories
+[Bio] Injected bio for Dad
+[Tools] Matched: web_search -> got results
+[Tools] Injected tool context into LLM messages
+[Memory] Stored user message for recall
+[SelfEval] h=4 c=5 l=2
+[LLM] Early repeat detected after 2 sentence(s), 112 chars (ratio=0.93) -- aborting
+[LLM] Retrying with temp_boost=0.25 (attempt 1)
+  Response (11.5s): Oh boy... basic math again Umpteenth reminder master Basic arithmetic operations still elude your memory somehow Serious...
+
+  --- Uniqueness Summary ---
+  [PASS] All 8 responses unique — No repeats detected!
+  [PASS] No gibberish detected in any response
+  [PASS] Average LLM response time: 10.3s
+  [PASS] Response opener variety: 8/8 unique prefixes
+
+============================================================
+  TEST 12: History File Integrity
+============================================================
+  [PASS] History loaded — 17 messages
+  [PASS] System prompt is first message
+  [PASS] No consecutive user messages (proper alternation)
+  [PASS] No duplicate assistant responses in history
+
+============================================================
+  FINAL SUMMARY
+============================================================
+  PASS: 49
+  FAIL: 0
+  WARN: 3
+  Total: 52
+
+  [OK] ALL TESTS PASSED (with 3 warnings)
+
+[Report saved to D:\Annabeth\test_results_deep.txt]
+[History restored from backup]
+
+──────────────────────────────────────────────────────────────────────
+SUITE: Read-Aloud Feature
+  script : test_read_aloud.py
+  status : PASS
+  passes : 65
+  fails  : 0
+  time   : 0.1s
+
+############################################################
+#  ANNABETH READ-ALOUD DEEP TEST
+#  2026-04-14 06:37:14
+############################################################
+
+============================================================
+  TEST 1: Module Imports & Structure
+============================================================
+  [PASS] Core read_aloud imports
+  [PASS] estimate_word_timings import
+  [PASS] ReadAloudStatus / ReadAloudState import
+  [PASS] register_companion_hwnd import (Win32 helper)
+  [PASS] get_last_capture_debug import
+  [PASS] __init__.py exports all public names
+
+============================================================
+  TEST 2: Sentence Splitting
+============================================================
+  [PASS] Split: Simple two sentences -- 2 sentences
+  [PASS] Split: Multiple sentences -- 4 sentences
+  [PASS] Split: Abbreviation handling -- 2 sentences
+  [PASS] Split: Single sentence no period -- 1 sentences
+  [PASS] Split: Empty string -- 0 sentences
+  [PASS] Split: Multiple abbreviations -- 2 sentences
+  [PASS] Split: Exclamation and question -- 3 sentences
+
+============================================================
+  TEST 3: ReadAloudManager State Machine
+============================================================
+  [PASS] Initial status is IDLE
+[ReadAloud] Starting to read 3 sentences
+  [PASS] Status after start_reading is READING
+  [PASS] Sentences count -- 3
+  [PASS] Current index starts at 0
+  [PASS] full_text stored correctly
+  [PASS] is_active is True while reading
+  [PASS] is_reading True
+  [PASS] advance_index increments correctly
+  [PASS] advance_index returns False + IDLE when done
+
+============================================================
+  TEST 4: Pause / Resume / Stop Lifecycle
+============================================================
+[ReadAloud] Starting to read 3 sentences
+[ReadAloud] Pause requested - will stop after current sentence
+  [PASS] pause() sets FINISHING status
+  [PASS] pause_requested is True
+[ReadAloud] Paused - you can ask questions now
+  [PASS] complete_pause() sets PAUSED
+  [PASS] is_paused True
+[ReadAloud] Resuming reading
+  [PASS] resume() returns to READING with next sentence
+[ReadAloud] Stopped
+  [PASS] stop() returns to IDLE
+
+============================================================
+  TEST 5: Q&A Context Generation
+============================================================
+[ReadAloud] Starting to read 3 sentences
+  [PASS] Q&A context contains read sentences
+  [PASS] Q&A context has framing text
+
+============================================================
+  TEST 6: Word Timing Estimation
+============================================================
+  [PASS] Correct number of word timings -- 5 words → 5 timings
+  [PASS] Each timing is (word, start, end) tuple
+  [PASS] Timings are in chronological order
+  [PASS] Last timing end matches total duration
+  [PASS] Empty sentence returns empty timings
+
+============================================================
+  TEST 7: Intent Phrase Matching
+============================================================
+  [PASS] Matched 'read this for me' → read
+  [PASS] Matched 'hey can you read this for me please' → read
+  [PASS] Matched 'read that for me' → read
+  [PASS] Matched 'read it for me' → read
+  [PASS] Matched 'please read the text' → read
+  [PASS] Matched 'read what's highlighted' → read
+  [PASS] Matched 'read my selection' → read
+  [PASS] Matched 'keep reading please' → resume
+  [PASS] Matched 'continue reading' → resume
+  [PASS] Matched 'go on reading' → resume
+  [PASS] Matched 'stop reading now' → stop
+  [PASS] Matched 'that's enough thanks' → stop
+  [PASS] Matched 'cancel reading' → stop
+  [PASS] No false match: 'tell me a joke'
+  [PASS] No false match: 'what's the weather like'
+
+============================================================
+  TEST 8: Singleton Manager
+============================================================
+  [PASS] get_read_aloud_manager returns same instance
+
+============================================================
+  TEST 9: Win32 Helpers (Windows)
+============================================================
+  [PASS] _IS_WIN is True on Windows
+  [PASS] _get_foreground_hwnd returns valid HWND -- hwnd=133224
+  [PASS] register_companion_hwnd(0) no crash
+  [PASS] _send_ctrl_c is callable
+
+============================================================
+  TEST 10: Browser Extension Files
+============================================================
+  [PASS] Extension file exists: manifest.json
+  [PASS] Extension file exists: background.js
+  [PASS] Extension file exists: content.js
+  [PASS] Manifest name contains 'Annabeth'
+  [PASS] Manifest v3
+
+============================================================
+  TEST 11: advance_index() method
+============================================================
+[ReadAloud] Starting to read 3 sentences
+  [PASS] current_sentence returns first sentence
+  [PASS] advance_index() moves to second sentence
+  [PASS] advance_index() moves to third sentence
+  [PASS] advance_index() returns False when done, IDLE
+
+============================================================
+  TEST 12: Thread Safety Smoke Test
+============================================================
+[ReadAloud] Starting to read 10 sentences
+[ReadAloud] Pause requested - will stop after current sentence
+[ReadAloud] Paused - you can ask questions now
+[ReadAloud] Resuming reading
+[ReadAloud] Pause requested - will stop after current sentence
+[ReadAloud] Paused - you can ask questions now
+[ReadAloud] Resuming reading
+[ReadAloud] Pause requested - will stop after current sentence
+[ReadAloud] Paused - you can ask questions now
+[ReadAloud] Resuming reading
+[ReadAloud] Pause requested - will stop after current sentence
+[ReadAloud] Paused - you can ask questions now
+[ReadAloud] Resuming reading
+[ReadAloud] Pause requested - will stop after current sentence
+[ReadAloud] Paused - you can ask questions now
+[ReadAloud] Resuming reading
+  [PASS] Concurrent read/pause/resume no exceptions
+
+============================================================
+  SUMMARY: 65 PASS / 0 FAIL  (total 65)
+============================================================
+
+──────────────────────────────────────────────────────────────────────
+SUITE: Avatar State Sync
+  script : test_avatar_state_sync.py
+  status : PASS
+  passes : 5
+  fails  : 0
+  time   : 0.5s
+
+############################################################
+#  ANNABETH AVATAR STATE SYNC TEST
+#  2026-04-14 06:37:14
+############################################################
+[State] Mode changed: active -> dance_full
+[State] Chat: [MUTED] SILENCED
+  [PASS] WebSocket test server startup -- port=50537
+[Avatar] Client connected. Total: 1
+  [PASS] Initial mode snapshot
+  [PASS] Initial silence snapshot
+[State] Mode changed: dance_full -> active
+  [PASS] Mode change broadcast
+[State] Chat: [UNMUTED] LISTENING
+  [PASS] Silence state broadcast
+[Avatar] Client disconnected. Total: 0
+
+============================================================
+  SUMMARY: 5 PASS / 0 FAIL  (total 5)
+============================================================
+
+──────────────────────────────────────────────────────────────────────
+SUITE: Avatar Message Broadcast
+  script : test_avatar_message_broadcast.py
+  status : PASS
+  passes : 7
+  fails  : 0
+  time   : 0.4s
+
+############################################################
+#  ANNABETH AVATAR MESSAGE BROADCAST TEST
+#  2026-04-14 06:37:15
+############################################################
+  [PASS] WebSocket test server startup -- port=50541
+[Avatar] Client connected. Total: 1
+  [PASS] speak_start broadcast
+  [PASS] speak_end broadcast
+  [PASS] emotion broadcast
+  [PASS] debug_status broadcast
+  [PASS] read_highlight broadcast
+  [PASS] read_clear broadcast
+[Avatar] Client disconnected. Total: 0
+
+============================================================
+  SUMMARY: 7 PASS / 0 FAIL  (total 7)
+============================================================
+
+──────────────────────────────────────────────────────────────────────
+SUITE: Audio Capture (hardware)
+  script : test_audio_capture.py
+  status : SKIP
+  passes : 0
+  fails  : 0
+  time   : 0.0s
+
+
+──────────────────────────────────────────────────────────────────────
+SUITE: WASAPI Loopback (live)
+  script : test_wasapi_loopback.py
+  status : SKIP
+  passes : 0
+  fails  : 0
+  time   : 0.0s
+
+
+──────────────────────────────────────────────────────────────────────
+SUITE: Unity Deep (live)
+  script : test_unity_deep.py
+  status : SKIP
+  passes : 0
+  fails  : 0
+  time   : 0.0s
+
+
+======================================================================
+  SUMMARY: 7 suites PASS  /  0 suites FAIL  /  3 skipped
+  Total assertions PASS: 284
+  Total assertions FAIL: 0
+  Wall time: 102.4s
+======================================================================

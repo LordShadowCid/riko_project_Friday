@@ -1,6 +1,11 @@
 # Minimal runtime requirements for the local chat client (Windows 11 friendly)
+aiohttp
+keyboard
 ollama
+PyQt6
+PyQt6-WebEngine
 PyYAML
+pywebview
 requests
 faster-whisper
 sounddevice

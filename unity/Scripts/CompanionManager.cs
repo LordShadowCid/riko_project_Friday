@@ -13,55 +13,70 @@ namespace Annabeth
     /// </summary>
     public class CompanionManager : MonoBehaviour
     {
-        [Header("Core Components")]
+        // ── Networking ──────────────────────────────────────────────
+
+        [Header("Networking")]
         [SerializeField] private WebSocketClient webSocketClient;
         [SerializeField] private MessageHandler messageHandler;
 
-        [Header("Avatar Components")]
+        // ── Avatar ──────────────────────────────────────────────────
+
+        [Header("Avatar")]
         [SerializeField] private AvatarController avatarController;
         [SerializeField] private LipSyncController lipSyncController;
         [SerializeField] private EmotionController emotionController;
         [SerializeField] private BlinkController blinkController;
         [SerializeField] private EyeTrackingController eyeTrackingController;
-        [SerializeField] private IdleAnimationController idleAnimationController;
+        [SerializeField] private IKController ikController;
+        [SerializeField] private AccessoryManager accessoryManager;
 
-        [Header("Dance Components")]
+        // ── Animation ───────────────────────────────────────────────
+
+        [Header("Animation")]
+        [SerializeField] private AnimationBlendController animationBlendController;
+        [SerializeField] private IdleAnimationController idleAnimationController;
+        [SerializeField] private WalkAnimationController walkAnimController;
+        [SerializeField] private DragAnimationController dragAnimController;
+        [SerializeField] private DragPoseController dragPoseController;
+
+        // ── Dance ───────────────────────────────────────────────────
+
+        [Header("Dance")]
         [SerializeField] private BeatDanceController beatDanceController;
         [SerializeField] private VrmaAnimationController vrmaAnimationController;
+        [SerializeField] private CustomDanceLoader customDanceLoader;
 
-        [Header("Animation Blending")]
-        [SerializeField] private AnimationBlendController animationBlendController;
+        // ── Interaction ─────────────────────────────────────────────
 
         [Header("Interaction")]
         [SerializeField] private TouchReactionController touchReactionController;
         [SerializeField] private TouchSoundHandler touchSoundHandler;
         [SerializeField] private ParticleEffectHandler particleEffectHandler;
-
-        [Header("UI")]
-        [SerializeField] private SpeechBubble speechBubble;
-
-        [Header("Phase 5: Drag + Effects")]
-        [SerializeField] private DragAnimationController dragAnimController;
-
-        [Header("Phase 6: System")]
-        [SerializeField] private SleepController sleepController;
-
-        [Header("Sprint 3: Walk + Drag Pose + Pet")]
-        [SerializeField] private WalkAnimationController walkAnimController;
-        [SerializeField] private DragPoseController dragPoseController;
         [SerializeField] private PetDetectionController petDetectionController;
 
-        [Header("Sprint 4: Desktop Integration")]
+        // ── Desktop ─────────────────────────────────────────────────
+
+        [Header("Desktop")]
+        [SerializeField] private DesktopLocomotionController locomotionController;
+        [SerializeField] private WindowSnapper windowSnapper;
         [SerializeField] private OccluderQuadManager occluderQuadManager;
         [SerializeField] private DesktopAmbientProbe ambientProbe;
 
-        [Header("Sprint 5: Dance Expansion + Alarms")]
-        [SerializeField] private AlarmTimerManager alarmTimerManager;
-        [SerializeField] private CustomDanceLoader customDanceLoader;
+        // ── UI ──────────────────────────────────────────────────────
 
-        [Header("Phase 8: Desktop Interaction")]
-        [SerializeField] private DesktopLocomotionController locomotionController;
-        [SerializeField] private WindowSnapper windowSnapper;
+        [Header("UI")]
+        [SerializeField] private SpeechBubble speechBubble;
+        [SerializeField] private IdleBubbleController idleBubbleController;
+
+        // ── System ──────────────────────────────────────────────────
+
+        [Header("System")]
+        [SerializeField] private SleepController sleepController;
+        [SerializeField] private IdleController idleController;
+        [SerializeField] private AlarmTimerManager alarmTimerManager;
+        [SerializeField] private DiscordPresence discordPresence;
+
+        // ── State ───────────────────────────────────────────────────
 
         [Header("State")]
         [SerializeField] private CompanionMode currentMode = CompanionMode.Idle;
@@ -69,15 +84,16 @@ namespace Annabeth
         [SerializeField] private bool isSilenced;
         [SerializeField] private bool isSpeaking;
 
-        // Track whether VRMA animation is audio-paused (no music playing)
         private bool _vrmaAudioPaused;
-
-        // Feature #12: Random message timer
         private float _randomMsgTimer;
 
         public CompanionMode CurrentMode => currentMode;
         public bool IsSpeaking => isSpeaking;
         public bool IsSilenced => isSilenced;
+
+        // ══════════════════════════════════════════════════════════════
+        //  Lifecycle
+        // ══════════════════════════════════════════════════════════════
 
         private void Awake()
         {
@@ -86,47 +102,50 @@ namespace Annabeth
             if (webSocketClient == null) webSocketClient = FindFirstObjectByType<WebSocketClient>();
             if (messageHandler == null) messageHandler = FindFirstObjectByType<MessageHandler>();
             if (avatarController == null) avatarController = FindFirstObjectByType<AvatarController>();
+
+            if (FindFirstObjectByType<ThemeManager>() == null)
+            {
+                var go = new GameObject("ThemeManager");
+                go.AddComponent<ThemeManager>();
+            }
         }
 
         private void Start()
         {
+            // Server messages
             if (messageHandler != null)
             {
                 messageHandler.OnSpeakStart += HandleSpeakStart;
                 messageHandler.OnSpeakEnd += HandleSpeakEnd;
                 messageHandler.OnEmotionChange += HandleEmotionChange;
+                messageHandler.OnFaceExpression += HandleFaceExpression;
                 messageHandler.OnModeChange += HandleModeChange;
                 messageHandler.OnSilenceToggle += HandleSilenceToggle;
                 messageHandler.OnAudioAnalysis += HandleAudioAnalysis;
                 messageHandler.OnDanceStyleChange += HandleDanceStyleChange;
+                messageHandler.OnReadHighlight += HandleReadHighlight;
+                messageHandler.OnReadClear += HandleReadClear;
+                messageHandler.OnIdleThought += HandleIdleThought;
             }
 
+            // Avatar
             if (avatarController != null)
-            {
                 avatarController.OnVrmLoaded += OnVrmLoaded;
-            }
 
-            // Wire Phase 5 drag events
+            // Window / drag
             var windowCtrl = FindFirstObjectByType<TransparentWindowController>();
             if (windowCtrl != null)
             {
                 windowCtrl.OnDragStart += HandleDragStart;
                 windowCtrl.OnDragEnd += HandleDragEnd;
-                // Feature #13: Wire file drop
                 windowCtrl.OnFileDropped += HandleFileDropped;
             }
 
-            // Cache Phase 6 sleep controller
-            if (sleepController == null)
-                sleepController = FindFirstObjectByType<SleepController>();
+            // Desktop
+            CacheIfNull(ref sleepController);
+            CacheIfNull(ref locomotionController);
+            CacheIfNull(ref windowSnapper);
 
-            // Cache Phase 8 desktop interaction controllers
-            if (locomotionController == null)
-                locomotionController = FindFirstObjectByType<DesktopLocomotionController>();
-            if (windowSnapper == null)
-                windowSnapper = FindFirstObjectByType<WindowSnapper>();
-
-            // Wire falling events for animation feedback
             if (windowSnapper != null)
             {
                 windowSnapper.OnSittingChanged += HandleSittingChanged;
@@ -134,36 +153,35 @@ namespace Annabeth
                 windowSnapper.OnFallLanded += HandleFallLanded;
             }
 
-            // Wire walk state events
             if (locomotionController != null)
             {
                 locomotionController.OnWalkStateChanged += HandleWalkStateChanged;
+                locomotionController.OnPeekStateChanged += HandlePeekStateChanged;
             }
 
-            // Feature #6: Wire sleep events
+            // Sleep
             if (sleepController != null)
             {
                 sleepController.OnSleepStart += HandleSleepStart;
                 sleepController.OnWakeUp += HandleWakeUp;
             }
 
-            // Feature #8: Wire peek events
-            if (locomotionController != null)
-            {
-                locomotionController.OnPeekStateChanged += HandlePeekStateChanged;
-            }
-
-            // Feature #11: Wire pet detection
-            if (petDetectionController == null)
-                petDetectionController = FindFirstObjectByType<PetDetectionController>();
+            // Interaction
+            CacheIfNull(ref petDetectionController);
             if (petDetectionController != null)
                 petDetectionController.OnPetDetected += HandlePetDetected;
 
-            // Feature #15: Wire alarm timer
-            if (alarmTimerManager == null)
-                alarmTimerManager = FindFirstObjectByType<AlarmTimerManager>();
+            // System
+            CacheIfNull(ref alarmTimerManager);
             if (alarmTimerManager != null)
                 alarmTimerManager.OnTimerFired += HandleTimerFired;
+
+            CacheIfNull(ref idleController);
+            if (idleController != null)
+            {
+                idleController.OnIdleStateChanged  += HandleIdleStateChanged;
+                idleController.OnSleepStateChanged += HandleSleepStateChanged;
+            }
         }
 
         private void OnDestroy()
@@ -173,16 +191,18 @@ namespace Annabeth
                 messageHandler.OnSpeakStart -= HandleSpeakStart;
                 messageHandler.OnSpeakEnd -= HandleSpeakEnd;
                 messageHandler.OnEmotionChange -= HandleEmotionChange;
+                messageHandler.OnFaceExpression -= HandleFaceExpression;
                 messageHandler.OnModeChange -= HandleModeChange;
                 messageHandler.OnSilenceToggle -= HandleSilenceToggle;
                 messageHandler.OnAudioAnalysis -= HandleAudioAnalysis;
                 messageHandler.OnDanceStyleChange -= HandleDanceStyleChange;
+                messageHandler.OnReadHighlight -= HandleReadHighlight;
+                messageHandler.OnReadClear -= HandleReadClear;
+                messageHandler.OnIdleThought -= HandleIdleThought;
             }
 
             if (avatarController != null)
-            {
                 avatarController.OnVrmLoaded -= OnVrmLoaded;
-            }
 
             var windowCtrl = FindFirstObjectByType<TransparentWindowController>();
             if (windowCtrl != null)
@@ -202,144 +222,125 @@ namespace Annabeth
             if (locomotionController != null)
             {
                 locomotionController.OnWalkStateChanged -= HandleWalkStateChanged;
+                locomotionController.OnPeekStateChanged -= HandlePeekStateChanged;
             }
 
-            // Feature #6: Unwire sleep events
             if (sleepController != null)
             {
                 sleepController.OnSleepStart -= HandleSleepStart;
                 sleepController.OnWakeUp -= HandleWakeUp;
             }
 
-            // Feature #8: Unwire peek events
-            if (locomotionController != null)
-            {
-                locomotionController.OnPeekStateChanged -= HandlePeekStateChanged;
-            }
-
-            // Feature #11: Unwire pet detection
             if (petDetectionController != null)
                 petDetectionController.OnPetDetected -= HandlePetDetected;
 
-            // Feature #15: Unwire alarm timer
             if (alarmTimerManager != null)
                 alarmTimerManager.OnTimerFired -= HandleTimerFired;
+
+            if (idleController != null)
+            {
+                idleController.OnIdleStateChanged  -= HandleIdleStateChanged;
+                idleController.OnSleepStateChanged -= HandleSleepStateChanged;
+            }
         }
+
+        // ══════════════════════════════════════════════════════════════
+        //  VRM Load — Initialize All Sub-Controllers
+        // ══════════════════════════════════════════════════════════════
 
         private void OnVrmLoaded(UniVRM10.Vrm10Instance vrm)
         {
             Debug.Log("[CompanionManager] VRM loaded, initializing components...");
 
-            // Feature #12: Reset random message timer
-            _randomMsgTimer = GetRandomMsgInterval();
-
-            // Find and initialize avatar sub-controllers
-            lipSyncController = avatarController.GetComponentInChildren<LipSyncController>();
-            emotionController = avatarController.GetComponentInChildren<EmotionController>();
-            blinkController = avatarController.GetComponentInChildren<BlinkController>();
-            eyeTrackingController = avatarController.GetComponentInChildren<EyeTrackingController>();
-            idleAnimationController = avatarController.GetComponentInChildren<IdleAnimationController>();
-
-            // Initialize dance controller
-            if (beatDanceController != null)
+            try
             {
-                beatDanceController.Initialize(vrm);
-            }
-
-            // Initialize VRMA animation controller
-            if (vrmaAnimationController != null)
-            {
-                vrmaAnimationController.Initialize(vrm);
-            }
-
-            // Initialize idle animation
-            if (idleAnimationController != null)
-            {
-                idleAnimationController.Initialize(vrm);
-            }
-
-            // Initialize touch reactions
-            touchReactionController = avatarController.GetComponentInChildren<TouchReactionController>();
-            if (touchReactionController != null)
-            {
-                touchReactionController.Initialize(vrm);
-                touchReactionController.OnTouchReaction += HandleTouchReaction;
-            }
-
-            // Initialize Phase 5 handlers
-            if (touchSoundHandler == null)
-                touchSoundHandler = FindFirstObjectByType<TouchSoundHandler>();
-            if (particleEffectHandler == null)
-                particleEffectHandler = FindFirstObjectByType<ParticleEffectHandler>();
-
-            // Initialize drag animation (Phase 5)
-            if (dragAnimController == null)
-                dragAnimController = FindFirstObjectByType<DragAnimationController>();
-            if (dragAnimController != null)
-                dragAnimController.Initialize(vrm);
-
-            // Sprint 3: Initialize walk animation controller
-            if (walkAnimController == null)
-                walkAnimController = FindFirstObjectByType<WalkAnimationController>();
-            if (walkAnimController != null)
-                walkAnimController.Initialize(vrm);
-
-            // Sprint 3: Initialize drag pose controller
-            if (dragPoseController == null)
-                dragPoseController = FindFirstObjectByType<DragPoseController>();
-            if (dragPoseController != null)
-                dragPoseController.Initialize(vrm);
-
-            // Sprint 3: Initialize pet detection
-            if (petDetectionController == null)
-                petDetectionController = FindFirstObjectByType<PetDetectionController>();
-            if (petDetectionController != null)
-            {
-                var headBoneForPet = avatarController.GetComponentInChildren<Animator>()
-                    ?.GetBoneTransform(HumanBodyBones.Head);
-                if (headBoneForPet != null)
-                    petDetectionController.SetHeadBone(headBoneForPet);
-            }
-
-            // Sprint 4: Initialize occluder quad manager
-            if (occluderQuadManager == null)
-                occluderQuadManager = FindFirstObjectByType<OccluderQuadManager>();
-
-            // Sprint 4: Initialize ambient probe
-            if (ambientProbe == null)
-                ambientProbe = FindFirstObjectByType<DesktopAmbientProbe>();
-
-            // Sprint 5: Initialize custom dance loader
-            if (customDanceLoader == null)
-                customDanceLoader = FindFirstObjectByType<CustomDanceLoader>();
-            if (customDanceLoader != null)
-            {
+                _randomMsgTimer = GetRandomMsgInterval();
                 var animator = avatarController.GetComponentInChildren<Animator>();
-                if (animator != null)
+
+                // Avatar controllers (live on the VRM hierarchy)
+                lipSyncController = avatarController.GetComponentInChildren<LipSyncController>();
+                emotionController = avatarController.GetComponentInChildren<EmotionController>();
+                blinkController = avatarController.GetComponentInChildren<BlinkController>();
+                eyeTrackingController = avatarController.GetComponentInChildren<EyeTrackingController>();
+                idleAnimationController = avatarController.GetComponentInChildren<IdleAnimationController>();
+
+                // Animation
+                idleAnimationController?.Initialize(vrm);
+                beatDanceController?.Initialize(vrm);
+                vrmaAnimationController?.Initialize(vrm);
+
+                CacheIfNull(ref dragAnimController);
+                dragAnimController?.Initialize(vrm);
+
+                CacheIfNull(ref walkAnimController);
+                walkAnimController?.Initialize(vrm);
+
+                CacheIfNull(ref dragPoseController);
+                dragPoseController?.Initialize(vrm);
+
+                // IK + Accessories
+                CacheIfNull(ref ikController);
+                ikController?.Initialize(vrm);
+
+                CacheIfNull(ref accessoryManager);
+                accessoryManager?.Initialize(vrm);
+
+                // Dance
+                CacheIfNull(ref customDanceLoader);
+                if (customDanceLoader != null && animator != null)
                     customDanceLoader.Initialize(animator);
-            }
 
-            // Wire speech bubble to head bone
-            if (speechBubble == null)
-                speechBubble = FindFirstObjectByType<SpeechBubble>();
-            if (speechBubble != null)
+                // Interaction
+                touchReactionController = avatarController.GetComponentInChildren<TouchReactionController>();
+                if (touchReactionController != null)
+                {
+                    touchReactionController.Initialize(vrm);
+                    touchReactionController.OnTouchReaction += HandleTouchReaction;
+                }
+
+                CacheIfNull(ref touchSoundHandler);
+                CacheIfNull(ref particleEffectHandler);
+
+                CacheIfNull(ref petDetectionController);
+                if (petDetectionController != null)
+                {
+                    var headBone = animator?.GetBoneTransform(HumanBodyBones.Head);
+                    if (headBone != null)
+                        petDetectionController.SetHeadBone(headBone);
+                }
+
+                // Desktop
+                CacheIfNull(ref occluderQuadManager);
+                CacheIfNull(ref ambientProbe);
+
+                // UI — attach speech bubble to head bone
+                CacheIfNull(ref speechBubble);
+                if (speechBubble != null)
+                {
+                    var headBone = animator?.GetBoneTransform(HumanBodyBones.Head);
+                    if (headBone != null)
+                        speechBubble.SetHeadBone(headBone);
+                }
+            }
+            catch (System.Exception e)
             {
-                var headBone = avatarController.GetComponentInChildren<Animator>()
-                    ?.GetBoneTransform(HumanBodyBones.Head);
-                if (headBone != null)
-                    speechBubble.SetHeadBone(headBone);
+                Debug.LogError($"[CompanionManager] OnVrmLoaded error: {e}");
             }
 
-            // Apply user settings to all controllers now that VRM is ready
+            // Apply user settings now that VRM is ready
             if (SettingsManager.Instance != null)
+            {
+                SettingsManager.Instance.InvalidateControllerCache();
                 SettingsManager.Instance.ApplyAllSettings();
+            }
         }
 
-        // ── Feature #12: Random Messages ─────────────────────────────
+        // ══════════════════════════════════════════════════════════════
+        //  Random Idle Messages
+        // ══════════════════════════════════════════════════════════════
 
         private void Update()
         {
-            // Feature #12: Fire random messages when idle and enabled
             var settings = Core.SettingsManager.Instance;
             if (settings == null || !settings.data.enableRandomMessages) return;
             if (currentMode != CompanionMode.Idle) return;
@@ -360,17 +361,21 @@ namespace Annabeth
             float minutes = 10f;
             if (Core.SettingsManager.Instance != null)
                 minutes = Core.SettingsManager.Instance.data.randomMessageIntervalMinutes;
-            // Add ±20% jitter
+            // Clamp minimum to 1 minute to prevent rapid-fire, add ±20% jitter
+            minutes = Mathf.Max(1f, minutes);
             return minutes * 60f * Random.Range(0.8f, 1.2f);
         }
 
-        // ── Event Handlers ──────────────────────────────────────────
+        // ══════════════════════════════════════════════════════════════
+        //  Speech & Emotion Handlers
+        // ══════════════════════════════════════════════════════════════
 
         private void HandleSpeakStart(string text)
         {
             isSpeaking = true;
             lipSyncController?.StartSpeaking();
             speechBubble?.ShowText(text);
+            discordPresence?.SetState("Talking");
             Debug.Log($"[CompanionManager] Speaking: {text}");
         }
 
@@ -379,6 +384,7 @@ namespace Annabeth
             isSpeaking = false;
             lipSyncController?.StopSpeaking();
             speechBubble?.StartDismissTimer();
+            discordPresence?.SetState("Idle");
             Debug.Log("[CompanionManager] Stopped speaking");
         }
 
@@ -388,46 +394,69 @@ namespace Annabeth
             Debug.Log($"[CompanionManager] Emotion: {emotion}");
         }
 
-        // ── Phase 5: Drag & Touch Handlers ──────────────────────────
+        private void HandleFaceExpression(string name, float intensity)
+        {
+            emotionController?.SetExpression(name, intensity);
+        }
+
+        private void HandleReadHighlight(string sentence)
+        {
+            speechBubble?.ShowText(sentence);
+            Debug.Log($"[CompanionManager] Read highlight: {sentence}");
+        }
+
+        private void HandleReadClear()
+        {
+            speechBubble?.HideNow();
+            Debug.Log("[CompanionManager] Read highlight cleared");
+        }
+
+        private void HandleIdleThought(string text)
+        {
+            idleBubbleController?.ShowIdleThought(text);
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        //  Drag & Touch Handlers
+        // ══════════════════════════════════════════════════════════════
 
         private void HandleDragStart()
         {
             touchSoundHandler?.PlayDragStart();
-            // Feature #5: Notify WindowSnapper of drag for sit guard timer
             windowSnapper?.NotifyDragStart();
-            // Feature #10: Switch to LookUp tracking during drag
             eyeTrackingController?.SetTrackingMode(TrackingMode.LookUp);
-            // Feature #4: Blend in drag pose
             if (dragPoseController != null)
                 TransitionAnimation(idleAnimationController, dragPoseController);
+            ikController?.SetDragging(true);
         }
 
         private void HandleDragEnd()
         {
             touchSoundHandler?.PlayDragEnd();
-            // Feature #5: Notify WindowSnapper of drag end (may trigger TrySitOnNearestWindow)
             windowSnapper?.NotifyDragEnd();
-            // Feature #10: Restore tracking mode based on current state
             RestoreTrackingMode();
-            // Feature #4: Blend out drag pose
             if (dragPoseController != null)
                 TransitionAnimation(dragPoseController, idleAnimationController);
+            ikController?.SetDragging(false);
         }
 
-        private void HandleTouchReaction(Vector3 hitPoint, bool isHead)
+        private void HandleTouchReaction(Vector3 hitPoint, TouchZone zone)
         {
             touchSoundHandler?.PlayTouchSound();
-            particleEffectHandler?.PlayAtPosition(hitPoint, isHead);
+            bool isHeadZone = zone == TouchZone.Head;
+            particleEffectHandler?.PlayAtPosition(hitPoint, isHeadZone);
         }
 
-        // ── Phase 8: Desktop Interaction Handlers ────────────────────
+        // ══════════════════════════════════════════════════════════════
+        //  Desktop Interaction Handlers
+        // ══════════════════════════════════════════════════════════════
 
         private void HandleSittingChanged(bool sitting)
         {
             Debug.Log($"[CompanionManager] Sitting: {sitting}");
-            // Feature #1: Enable/disable occluder quads when sitting on windows
             if (occluderQuadManager != null && windowSnapper != null)
                 occluderQuadManager.SetEnabled(sitting, windowSnapper.SittingOnWindowHandle);
+            ikController?.SetSitting(sitting);
         }
 
         private void HandleFallStarted()
@@ -445,21 +474,17 @@ namespace Annabeth
         private void HandleWalkStateChanged(bool walking)
         {
             Debug.Log($"[CompanionManager] Walking: {walking}");
-            // Feature #3: Blend walk animation in/out
             if (walking)
                 TransitionAnimation(idleAnimationController, walkAnimController);
             else
                 TransitionAnimation(walkAnimController, idleAnimationController);
         }
 
-        // ── Feature #8: Peek/Hide Handlers ──────────────────────────
-
         private void HandlePeekStateChanged(bool peeking)
         {
             Debug.Log($"[CompanionManager] Peeking: {peeking}");
             if (peeking)
             {
-                // Determine peek direction: check if window is near left or right edge
                 float leanDir = locomotionController.GetWalkDirection() < 0 ? -1f : 1f;
                 idleAnimationController?.SetPeekLean(leanDir);
             }
@@ -469,7 +494,9 @@ namespace Annabeth
             }
         }
 
-        // ── Feature #11: Pet Detection Handler ──────────────────────
+        // ══════════════════════════════════════════════════════════════
+        //  Interaction Handlers (pet, file drop, alarm)
+        // ══════════════════════════════════════════════════════════════
 
         private void HandlePetDetected()
         {
@@ -478,16 +505,12 @@ namespace Annabeth
             speechBubble?.ShowText("~♪");
         }
 
-        // ── Feature #13: File Drop Handler ──────────────────────────
-
         private void HandleFileDropped(string filePath)
         {
             Debug.Log($"[CompanionManager] File dropped: {filePath}");
             if (filePath.EndsWith(".vrm", System.StringComparison.OrdinalIgnoreCase) && avatarController != null)
                 _ = avatarController.LoadVRM(filePath, isAbsolutePath: true);
         }
-
-        // ── Feature #15: Alarm/Timer Handler ────────────────────────
 
         private void HandleTimerFired(TimerEntry timer)
         {
@@ -496,7 +519,9 @@ namespace Annabeth
             speechBubble?.ShowText($"⏰ {timer.label} — Time's up!");
         }
 
-        // ── Feature #6: Sleep Handlers ──────────────────────────────
+        // ══════════════════════════════════════════════════════════════
+        //  Sleep & Idle Handlers
+        // ══════════════════════════════════════════════════════════════
 
         private void HandleSleepStart()
         {
@@ -515,9 +540,36 @@ namespace Annabeth
             RestoreTrackingMode();
         }
 
-        /// <summary>
-        /// Feature #10: Restore tracking mode based on current companion state.
-        /// </summary>
+        private void HandleIdleStateChanged(bool idle)
+        {
+            Debug.Log($"[CompanionManager] Idle state: {idle}");
+            idleBubbleController?.SetIdleMode(idle);
+            if (idle) discordPresence?.SetState("Idle");
+        }
+
+        private void HandleSleepStateChanged(bool sleeping)
+        {
+            Debug.Log($"[CompanionManager] Sleep state (IdleController): {sleeping}");
+            if (sleeping)
+            {
+                blinkController?.ForceClose();
+                idleAnimationController?.SetSleeping(true);
+                discordPresence?.SetState("Sleeping");
+            }
+            else
+            {
+                blinkController?.ForceOpen();
+                blinkController?.TriggerRapidBlinks(2);
+                idleAnimationController?.SetSleeping(false);
+                RestoreTrackingMode();
+                discordPresence?.SetState("Idle");
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        //  Mode & Dance
+        // ══════════════════════════════════════════════════════════════
+
         private void RestoreTrackingMode()
         {
             if (sleepController != null && sleepController.IsSleeping)
@@ -548,14 +600,12 @@ namespace Annabeth
             switch (mode)
             {
                 case CompanionMode.Active:
-                    eyeTrackingController?.SetEnabled(true);
-                    eyeTrackingController?.SetTrackingMode(TrackingMode.Normal);
+                    RestoreTrackingMode();
                     TransitionAnimation(beatDanceController, idleAnimationController);
                     break;
 
                 case CompanionMode.Idle:
-                    eyeTrackingController?.SetEnabled(true);
-                    eyeTrackingController?.SetTrackingMode(TrackingMode.Normal);
+                    RestoreTrackingMode();
                     TransitionAnimation(beatDanceController, idleAnimationController);
                     emotionController?.ClearEmotion();
                     break;
@@ -563,6 +613,7 @@ namespace Annabeth
                 case CompanionMode.Dance:
                     // Feature #10: Reduced tracking during dance
                     eyeTrackingController?.SetTrackingMode(TrackingMode.Reduced);
+                    discordPresence?.SetState("Dancing");
                     if (currentDanceStyle == DanceStyle.Procedural)
                     {
                         beatDanceController?.StartDancing();
@@ -693,7 +744,9 @@ namespace Annabeth
             Debug.Log($"[CompanionManager] Dance style: {previousStyle} → {style}");
         }
 
-        // ── Public Methods ──────────────────────────────────────────
+        // ══════════════════════════════════════════════════════════════
+        //  Public API
+        // ══════════════════════════════════════════════════════════════
 
         public void SetMode(CompanionMode mode)
         {
@@ -726,9 +779,6 @@ namespace Annabeth
             messageHandler?.SendSilenceToggle();
         }
 
-        /// <summary>
-        /// Play a VRMA animation by filename (from StreamingAssets/Animations/).
-        /// </summary>
         private async System.Threading.Tasks.Task PlayVrmaAnimation(string fileName)
         {
             if (vrmaAnimationController == null)
@@ -737,11 +787,29 @@ namespace Annabeth
                 return;
             }
             await vrmaAnimationController.LoadAndPlay(fileName, destroyCancellationToken);
-            // Start paused so animation only plays when music is detected
             if (_vrmaAudioPaused)
             {
                 vrmaAnimationController.Pause();
             }
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        //  Helpers
+        // ══════════════════════════════════════════════════════════════
+
+        private void OnApplicationQuit()
+        {
+            // Tell the Python backend to shut down when the Unity app closes
+            if (webSocketClient != null)
+            {
+                webSocketClient.Send(MessageTypes.SHUTDOWN);
+            }
+        }
+
+        private void CacheIfNull<T>(ref T field) where T : Component
+        {
+            if (field == null)
+                field = FindFirstObjectByType<T>();
         }
     }
 }

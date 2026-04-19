@@ -56,6 +56,31 @@ def _init_tables(conn: sqlite3.Connection):
         CREATE INDEX IF NOT EXISTS idx_feedback_type ON feedback(event_type);
         CREATE INDEX IF NOT EXISTS idx_feedback_time ON feedback(timestamp);
         CREATE INDEX IF NOT EXISTS idx_self_eval_time ON self_eval(timestamp);
+        CREATE TABLE IF NOT EXISTS emotion_state (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            emotion   TEXT    NOT NULL,
+            intensity REAL    NOT NULL DEFAULT 0.0,
+            timestamp REAL    NOT NULL,
+            UNIQUE(emotion)
+        );
+        CREATE INDEX IF NOT EXISTS idx_emotion_state_emotion ON emotion_state(emotion);
+        CREATE TABLE IF NOT EXISTS diary (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp  REAL    NOT NULL,
+            entry      TEXT    NOT NULL,
+            mood       TEXT    DEFAULT 'neutral',
+            trigger    TEXT    DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_diary_time ON diary(timestamp);
+        CREATE TABLE IF NOT EXISTS speaker_bio (
+            speaker_id   TEXT PRIMARY KEY,
+            real_name    TEXT DEFAULT '',
+            relationship TEXT DEFAULT 'user',
+            timezone     TEXT DEFAULT '',
+            known_facts  TEXT DEFAULT '[]',
+            last_seen    REAL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_bio_speaker ON speaker_bio(speaker_id);
     """)
 
 

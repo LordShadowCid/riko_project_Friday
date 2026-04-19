@@ -7,16 +7,34 @@ Handles:
 - TTS synthesis (GPT-SoVITS)
 - Avatar integration
 """
+# Logging must be configured before any other server imports so that
+# modules which call logging.getLogger(__name__) at import time pick up
+# the correct handlers.
+from server.logging_config import configure_logging
+configure_logging()
+
+# Temporary test-session debug logger — remove after testing is complete.
+from server.debug_logger import setup_test_logging
+setup_test_logging()
+
+import logging
+_log = logging.getLogger(__name__)
+
 from server.process.asr_func.asr_push_to_talk import record_and_transcribe, transcribe_file
 from server.process.asr_func.asr_vad import (
     record_vad_and_transcribe, 
     get_interrupt_flag,
     get_speaking_flag,
 )
-import keyboard
+try:
+    import keyboard
+    HAS_KEYBOARD = True
+except ImportError:
+    keyboard = None
+    HAS_KEYBOARD = False
 from server.process.llm_funcs.llm_scr import llm_response, llm_response_streaming
 from server.process.tts_func.sovits_ping import sovits_gen, play_audio
-from server.process.read_aloud.text_capture import estimate_word_timings, capture_selected_text
+from server.process.read_aloud.text_capture import estimate_word_timings, capture_selected_text, get_last_capture_debug
 from pathlib import Path
 import os
 import sys
@@ -32,6 +50,7 @@ from typing import Optional
 
 from server.annabeth_config import load_config, repo_root, resolve_repo_path
 from server.process.memory.feedback import log_feedback
+from server.utils import configure_windows_cuda_runtime, describe_port_listener
 
 # Add parent directory for shared imports
 _project_root = Path(__file__).parent.parent
@@ -52,41 +71,79 @@ _state = get_companion_state()
 # Avatar server integration
 avatar_api: Optional[dict] = None
 avatar_loop: Optional[asyncio.AbstractEventLoop] = None
+SELF_CHECK_ONLY = (
+    "--self-check-only" in sys.argv
+    or str(os.environ.get("ANNABETH_SELF_CHECK_ONLY", "")).strip().lower() in {"1", "true", "yes", "on"}
+)
+
+# Module-level state — initialized here so _start_avatar_server() can reference them
+# before the full initialisation block lower in the file.
+_improvement_scheduler = None
 
 def _start_avatar_server() -> None:
     """Start the avatar WebSocket server in a background thread"""
     global avatar_api, avatar_loop
-    
-    try:
-        # Import from client directory
-        client_dir = _shared_config.paths.client_dir
-        if str(client_dir) not in sys.path:
-            sys.path.insert(0, str(client_dir))
-        
-        from avatar_server import start_avatar_server, get_avatar_api
-        
-        avatar_loop = asyncio.new_event_loop()
-        
-        def run_server():
+
+    # Import from client directory
+    client_dir = _shared_config.paths.client_dir
+    if str(client_dir) not in sys.path:
+        sys.path.insert(0, str(client_dir))
+
+    from avatar_server import start_avatar_server, get_avatar_api
+
+    avatar_loop = asyncio.new_event_loop()
+    startup_ready = threading.Event()
+    startup_error = []
+
+    def run_server():
+        try:
             asyncio.set_event_loop(avatar_loop)
             avatar_loop.run_until_complete(start_avatar_server())
-            avatar_loop.run_forever()
-        
-        thread = threading.Thread(target=run_server, daemon=True)
-        thread.start()
-        
-        # Give server time to start
-        time.sleep(0.5)
-        
-        avatar_api = get_avatar_api()
-        port = _shared_config.server.avatar_port
-        print(f"[Avatar] Server started at http://localhost:{port}")
-        
-    except ImportError as e:
-        print(f"[Avatar] Could not start avatar server (missing aiohttp?): {e}")
-        print("[Avatar] Install with: pip install aiohttp")
-    except Exception as e:
-        print(f"[Avatar] Could not start avatar server: {e}")
+        except Exception as exc:
+            startup_error.append(exc)
+        finally:
+            startup_ready.set()
+
+        if startup_error:
+            return
+
+        avatar_loop.run_forever()
+
+    thread = threading.Thread(target=run_server, daemon=True)
+    thread.start()
+
+    if not startup_ready.wait(timeout=5.0):
+        raise RuntimeError("Avatar server startup timed out before binding port 8765")
+
+    if startup_error:
+        error = startup_error[0]
+        if isinstance(error, OSError) and getattr(error, "errno", None) == 10048:
+            port = _shared_config.server.avatar_port
+            detail = describe_port_listener(port, expected_text="Annabeth Avatar")
+            raise RuntimeError(
+                f"Avatar server failed to start because {detail} Stop the existing Annabeth backend or use the running instance instead."
+            ) from error
+        raise RuntimeError(f"Avatar server failed to start: {error}") from error
+
+    avatar_api = get_avatar_api()
+    print(f"[Avatar] Server started at {_shared_config.server.avatar_http_url}")
+
+    # Register face broadcast for facial expression timeline (Phase 2)
+    try:
+        from server.process.llm_funcs.facial_expressions import set_face_broadcast
+        set_face_broadcast(avatar_loop, avatar_api['broadcast'])
+        print("[FacialExpr] Broadcast registered")
+    except Exception as _fe_err:
+        print(f"[FacialExpr] Broadcast registration failed (non-fatal): {_fe_err}")
+
+    # Start self-improvement scheduler inside the avatar event loop (Phase 10)
+    if _improvement_scheduler is not None:
+        try:
+            asyncio.run_coroutine_threadsafe(
+                _start_improvement_scheduler(), avatar_loop
+            )
+        except Exception as _si_err:
+            print(f"[SelfImprovement] Scheduler start failed (non-fatal): {_si_err}")
 
 
 def avatar_speak_start(text: Optional[str] = None) -> None:
@@ -122,6 +179,13 @@ def is_listening_paused() -> bool:
     """Check if listening should be paused (dance/idle modes or silenced)"""
     # Use shared state - this is updated by avatar_server when S key is pressed
     return _state.is_listening_paused()
+
+
+async def _start_improvement_scheduler():
+    """Coroutine that starts the self-improvement scheduler inside the avatar event loop."""
+    if _improvement_scheduler is not None:
+        _improvement_scheduler.start()
+        print("[SelfImprovement] Scheduler running (interval: weekly).")
 
 
 def _prepare_whisper_model_source(model_name: str) -> str:
@@ -168,13 +232,16 @@ def _prepare_whisper_model_source(model_name: str) -> str:
 
 def _startup_self_check(char_config: dict, input_device, output_device, whisper_cfg: dict) -> None:
     print("\n--- Startup self-check ---")
+    startup_errors = []
 
-    # API key sanity
+    # Backend sanity
     api_key = str(os.environ.get('OPENAI_API_KEY') or char_config.get('OPENAI_API_KEY', '') or '')
     if not api_key or api_key.strip() in {"sk-YOURAPIKEY", "YOUR_API_KEY"}:
-        print("WARNING: OPENAI_API_KEY is not set (set env var OPENAI_API_KEY or set it in character_config.yaml)")
+        print("LLM: OPENAI_API_KEY not set; local Ollama backend will be used")
+    else:
+        print("LLM: OPENAI_API_KEY detected; OpenAI backend may override local Ollama")
 
-    # Ref audio sanity
+    # Ref audio sanity (warning only — pyttsx3 fallback handles missing TTS server)
     try:
         ref_audio = (char_config.get('sovits_ping_config') or {}).get('ref_audio_path')
         if ref_audio:
@@ -185,9 +252,11 @@ def _startup_self_check(char_config: dict, input_device, output_device, whisper_
             else:
                 ref_audio_abs = resolve_repo_path(ref_audio)
                 if not Path(ref_audio_abs).exists():
-                    print(f"WARNING: ref_audio_path not found: {ref_audio_abs}")
+                    print(f"WARNING: TTS ref_audio_path not found: {ref_audio_abs} (will use pyttsx3 fallback)")
+        else:
+            print("WARNING: TTS ref_audio_path is not configured (will use pyttsx3 fallback)")
     except Exception:
-        pass
+        print("WARNING: TTS ref_audio_path could not be validated (will use pyttsx3 fallback)")
 
     # Audio device visibility
     try:
@@ -210,7 +279,7 @@ def _startup_self_check(char_config: dict, input_device, output_device, whisper_
         + f"compute_type={whisper_cfg.get('compute_type', 'float32')}"
     )
 
-    # TTS server reachability (best-effort)
+    # TTS server reachability (best-effort — warning only, pyttsx3 fallback exists)
     tts_url = _shared_config.server.tts_url
     try:
         import requests
@@ -218,15 +287,15 @@ def _startup_self_check(char_config: dict, input_device, output_device, whisper_
         if r.status_code == 200:
             print(f"TTS: GPT-SoVITS server reachable at {tts_url} [OK]")
         else:
-            print(f"WARNING: GPT-SoVITS returned status {r.status_code} at {tts_url}/docs")
+            print(f"WARNING: GPT-SoVITS returned status {r.status_code} — pyttsx3 fallback active")
     except Exception:
-        print(f"WARNING: GPT-SoVITS server not detected at {tts_url} (start it before chatting)")
-        print("         Fallback TTS (pyttsx3) will be used if available")
+        print(f"WARNING: GPT-SoVITS not detected at {tts_url} — pyttsx3 fallback active")
 
     # Ollama reachability (retry up to 3 times for slow starts)
-    ollama_host = char_config.get('ollama', {}).get('host', 'http://localhost:11434')
-    ollama_model = char_config.get('model', 'mannix/llama3.1-8b-abliterated')
+    ollama_host = char_config.get('ollama', {}).get('host', 'http://127.0.0.1:11434')
+    ollama_model = char_config.get('ollama', {}).get('model') or char_config.get('model', 'mannix/llama3.1-8b-abliterated')
     ollama_ok = False
+    ollama_model_found = False
     for _attempt in range(3):
         try:
             import requests
@@ -235,19 +304,41 @@ def _startup_self_check(char_config: dict, input_device, output_device, whisper_
                 models = [m['name'] for m in r.json().get('models', [])]
                 if any(ollama_model in m for m in models):
                     print(f"Ollama: {ollama_model} loaded [OK]")
+                    ollama_model_found = True
                 else:
-                    print(f"WARNING: Ollama running but model '{ollama_model}' not found")
-                    print(f"         Available: {', '.join(models[:5])}")
+                    startup_errors.append(
+                        f"Ollama running but model '{ollama_model}' not found. Available: {', '.join(models[:5])}"
+                    )
                 ollama_ok = True
                 break
             else:
-                print(f"WARNING: Ollama returned status {r.status_code}")
+                startup_errors.append(f"Ollama returned status {r.status_code}")
         except Exception:
             if _attempt < 2:
                 print(f"Ollama not ready, retrying ({_attempt + 1}/3)...")
                 time.sleep(2)
             else:
-                print(f"WARNING: Ollama not detected at {ollama_host} (is it running?)")
+                startup_errors.append(f"Ollama not detected at {ollama_host} (is it running?)")
+
+    # Pre-warm Ollama model — force-load into VRAM so first real query is fast
+    if ollama_ok and ollama_model_found:
+        try:
+            import requests
+            keep_alive = char_config.get('ollama', {}).get('keep_alive', -1)
+            print(f"Ollama: Pre-warming {ollama_model} (loading into VRAM)...")
+            r = requests.post(f"{ollama_host}/api/generate", json={
+                "model": ollama_model,
+                "prompt": "hi",
+                "stream": False,
+                "keep_alive": keep_alive,
+                "options": {"num_predict": 1},
+            }, timeout=120)
+            if r.status_code == 200:
+                print(f"Ollama: Model pre-warmed [OK]")
+            else:
+                print(f"Ollama: Pre-warm got status {r.status_code}")
+        except Exception as e:
+            print(f"Ollama: Pre-warm failed (non-fatal): {e}")
 
     # Audio input/output device validation
     try:
@@ -272,6 +363,10 @@ def _startup_self_check(char_config: dict, input_device, output_device, whisper_
     # Repo root recap
     print(f"Repo root: {_shared_config.paths.project_root}")
 
+    if startup_errors:
+        print("--- End self-check ---\n")
+        raise RuntimeError("Startup self-check failed:\n - " + "\n - ".join(startup_errors))
+
     print("--- End self-check ---\n")
 
 
@@ -288,6 +383,8 @@ def clean_text_for_tts(text: str) -> str:
     - Asterisk actions like *laughs* or *sighs*
     - ALL CAPS words (converts to lowercase)
     - Multiple exclamation/question marks
+    - Emotion state tags: {happy 8.5} or malformed amused 7.1})
+    - Percentage emotion annotations: 25% happy, 40% annoyed
     """
     if not text:
         return text
@@ -296,6 +393,35 @@ def clean_text_for_tts(text: str) -> str:
     # This handles both actions and emphasized words
     text = re.sub(r'\*[^*]+\*', '', text)
     
+    # Strip all curly-brace blocks — catches {happy 8.5} emotion tags that
+    # slipped past the on_sentence wrapper (belt-and-suspenders)
+    text = re.sub(r'\{[^}]*\}', '', text)
+
+    # Strip percentage-format emotion annotations: "25% happy", "40% annoyed"
+    _EMOTION_WORDS = (
+        r'happy|sad|angry|annoyed|anxious|amused|curious|relaxed|'
+        r'fear|disgust|surprised|love|neutral|devotion|arousal'
+    )
+    text = re.sub(
+        r'\b\d+(?:\.\d+)?%\s+(?:' + _EMOTION_WORDS + r')\b',
+        '', text, flags=re.IGNORECASE
+    )
+
+    # Strip orphaned closing-brace fragments — the model often produces malformed
+    # emotion annotations like:  "amused 7.1})"  "disappointed resignation 8.0}))"
+    # Pattern: one or two words followed by a decimal number and closing brace/paren
+    text = re.sub(
+        r'\b\w+(?:\s+\w+)?\s+-?\d+(?:\.\d+)?\s*[})]+',
+        '', text, flags=re.IGNORECASE
+    )
+
+    # Strip "Feeling: word NUMBER}" and "Feeling: word" annotations
+    text = re.sub(r'\bFeeling:\s*[\w\s,.:]+\d[)},]*', '', text, flags=re.IGNORECASE)
+
+    # Strip trailing orphan punctuation left by removals  e.g. "):  " -> ""
+    text = re.sub(r'^[)\]},:\s]+', '', text)
+    text = re.sub(r'[)\]},:\s]+$', '', text)
+
     # Convert ALL CAPS words (3+ letters) to title case
     def fix_caps(match):
         word = match.group(0)
@@ -520,6 +646,8 @@ _start_avatar_server()
 
 char_config = load_config()
 
+configure_windows_cuda_runtime()
+
 whisper_cfg = char_config.get('whisper', {}) or {}
 cuda_visible = whisper_cfg.get('cuda_visible_devices')
 if cuda_visible:
@@ -589,6 +717,45 @@ if use_speaker_id:
 
 _startup_self_check(char_config, input_device, output_device, whisper_cfg)
 
+if SELF_CHECK_ONLY:
+    print("[Startup] Self-check-only mode complete; exiting before microphone loop.")
+    raise SystemExit(0)
+
+# Start autonomous reflection loop
+try:
+    from server.process.memory.reflection_loop import start_reflection_loop, get_proactive_queue
+    def _is_annabeth_idle():
+        return not _state.speaking and not get_speaking_flag().is_set()
+    _reflection_loop = start_reflection_loop(is_idle_fn=_is_annabeth_idle)
+    _proactive_queue = get_proactive_queue()
+except Exception as _e:
+    print(f"[Reflection] Failed to start (non-fatal): {_e}")
+    _reflection_loop = None
+    _proactive_queue = None
+
+# Start emotion decay loop so emotions gradually return to baseline
+try:
+    from server.process.memory.emotion_state import start_decay_loop
+    start_decay_loop(interval_seconds=60)
+except Exception as _e:
+    print(f"[EmotionState] Failed to start decay loop (non-fatal): {_e}")
+
+# Start self-improvement scheduler (Phase 10)
+try:
+    from server.process.self_improvement.scheduler import ImprovementScheduler, SchedulerConfig
+    from pathlib import Path as _Path
+    _improvement_scheduler = ImprovementScheduler(
+        config=SchedulerConfig(src_path=_Path("server")),
+        on_improvement_ready=lambda imp: print(
+            f"[SelfImprovement] Opportunity: {imp.opportunity.description} "
+            f"in {imp.opportunity.file_path}:{imp.opportunity.line_number}"
+        ),
+    )
+    # Scheduler.start() requires an asyncio event loop — deferred to the async startup.
+except Exception as _e:
+    print(f"[SelfImprovement] Failed to initialise (non-fatal): {_e}")
+    _improvement_scheduler = None
+
 if use_vad:
     print("\n[MIC] HANDS-FREE MODE enabled - just start speaking!")
     print("   (Annabeth will listen and respond automatically)")
@@ -604,11 +771,50 @@ def _hotkey_interrupt():
         flag.set()
         print("[STOP] Hotkey interrupt!")
 
-keyboard.add_hotkey('ctrl+shift+x', _hotkey_interrupt, suppress=False)
+if HAS_KEYBOARD:
+    keyboard.add_hotkey('ctrl+shift+x', _hotkey_interrupt, suppress=False)
+else:
+    print("[STOP] 'keyboard' module not installed; global interrupt hotkey disabled")
 
 _prev_llm_thread = None  # Track previous LLM thread for join-on-interrupt
 
 while True:
+    # =========================================================================
+    # CHECK FOR SHUTDOWN REQUEST (from Unity OnApplicationQuit)
+    # =========================================================================
+    if _state.shutdown_requested:
+        print("\n[Shutdown] Frontend requested shutdown — exiting...")
+        break
+
+    # =========================================================================
+    # CHECK PROACTIVE THOUGHT QUEUE (reflection loop)
+    # =========================================================================
+    if _proactive_queue is not None and not _proactive_queue.empty() and not is_listening_paused():
+        try:
+            thought = _proactive_queue.get_nowait()
+            if thought:
+                print(f"\n[Proactive] {thought}")
+                # Broadcast as idle_thought speech bubble to Unity (Phase 6)
+                if avatar_api and avatar_loop:
+                    asyncio.run_coroutine_threadsafe(
+                        avatar_api['broadcast']({"type": "idle_thought", "text": thought}),
+                        avatar_loop
+                    )
+                avatar_speak_start(thought)
+                uid = uuid.uuid4().hex
+                _proactive_audio_dir = _shared_config.paths.audio_dir
+                _proactive_audio_dir.mkdir(parents=True, exist_ok=True)
+                _pq_wav = sovits_gen(thought, _proactive_audio_dir / f"proactive_{uid}.wav")
+                if _pq_wav:
+                    play_audio(_pq_wav, output_device=output_device)
+                    try:
+                        Path(_pq_wav).unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                avatar_speak_end()
+        except Exception as _pq_e:
+            print(f"[Proactive] Error: {_pq_e}")
+
     # =========================================================================
     # CHECK FOR READ-ALOUD QUEUE
     # =========================================================================
@@ -781,6 +987,14 @@ while True:
                 continue
             else:
                 print("[ReadAloud] No text captured - make sure text is selected!")
+                capture_debug = get_last_capture_debug()
+                print(
+                    "[ReadAloud] Capture debug: "
+                    f"hwnd={capture_debug.get('foreground_hwnd')} "
+                    f"title={capture_debug.get('foreground_title')!r} "
+                    f"target_was_companion={capture_debug.get('target_was_companion')} "
+                    f"clipboard_had_text_before={capture_debug.get('clipboard_had_text_before')}"
+                )
                 # Tell the user through TTS
                 fail_text = "I don't see any text selected. Try highlighting the text you want me to read first."
                 print(f"Annabeth: {fail_text}")
@@ -836,8 +1050,11 @@ while True:
             """Called for each sentence from the LLM."""
             if t_first_sentence[0] is None:
                 t_first_sentence[0] = time.time()
-            full_response.append(sentence)
-            sentence_queue.put(sentence)
+            # Clean LLM output before display (strip *actions*, ALL CAPS, etc.)
+            cleaned = clean_text_for_tts(sentence)
+            if cleaned:
+                full_response.append(cleaned)
+                sentence_queue.put(cleaned)
         
         def run_llm():
             """Run LLM in background thread."""
@@ -918,6 +1135,17 @@ while True:
         llm_thread = threading.Thread(target=run_llm, daemon=True)
         llm_thread.start()
         _prev_llm_thread = llm_thread
+
+        # Gate Grillo beats during active conversation (Phase 6)
+        try:
+            from server.process.memory.reflection_loop import set_conversation_active as _set_conv_active
+            _set_conv_active(True)
+        except Exception:
+            pass
+
+        # Block self-improvement writes during active conversation (Phase 10)
+        if _improvement_scheduler is not None:
+            _improvement_scheduler.conversation_active = True
         
         # Start TTS pipeline in background
         tts_thread = threading.Thread(target=run_tts_pipeline, daemon=True)
@@ -1003,6 +1231,24 @@ while True:
         except Exception:
             pass
 
+        # Notify reflection loop that activity just happened
+        try:
+            if _reflection_loop is not None:
+                _reflection_loop.notify_activity()
+        except Exception:
+            pass
+
+        # Clear conversation-active gate (Phase 6)
+        try:
+            from server.process.memory.reflection_loop import set_conversation_active as _set_conv_active
+            _set_conv_active(False)
+        except Exception:
+            pass
+
+        # Re-enable self-improvement writes (Phase 10)
+        if _improvement_scheduler is not None:
+            _improvement_scheduler.conversation_active = False
+
         if was_interrupted:
             print("(Annabeth was interrupted - listening for your input...)")
 
@@ -1027,3 +1273,35 @@ while True:
                     fp.unlink()
         except Exception:
             pass
+
+# =========================================================================
+# POST-LOOP CLEANUP — runs after the main loop exits (shutdown or Ctrl+C)
+# =========================================================================
+print("[Shutdown] Cleaning up...")
+
+# Stop the avatar WebSocket server
+if avatar_loop is not None:
+    avatar_loop.call_soon_threadsafe(avatar_loop.stop)
+
+# Stop the emotion decay loop
+try:
+    from server.process.memory.emotion_state import stop_decay_loop
+    stop_decay_loop()
+except Exception:
+    pass
+
+# Stop the self-improvement scheduler
+if _improvement_scheduler is not None:
+    try:
+        _improvement_scheduler.stop()
+    except Exception:
+        pass
+
+# Stop the reflection (grillo) loop
+if _reflection_loop is not None:
+    try:
+        _reflection_loop.stop()
+    except Exception:
+        pass
+
+print("[Shutdown] Annabeth stopped.")

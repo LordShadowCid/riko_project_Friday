@@ -12,7 +12,7 @@ namespace Annabeth.Avatar
     /// </summary>
     public static class VrmFilePicker
     {
-#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+#if UNITY_STANDALONE_WIN
         [DllImport("comdlg32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         private static extern bool GetOpenFileName(ref OpenFileName ofn);
 

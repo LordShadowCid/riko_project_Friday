@@ -62,6 +62,7 @@ section("TEST 1: Module Imports & Structure")
 try:
     from server.process.read_aloud import (
         capture_selected_text,
+        get_last_capture_debug,
         split_into_sentences,
         ReadAloudManager,
         get_read_aloud_manager,
@@ -88,10 +89,19 @@ try:
 except ImportError as e:
     FAIL("register_companion_hwnd import", str(e))
 
+try:
+    debug_info = get_last_capture_debug()
+    if isinstance(debug_info, dict):
+        PASS("get_last_capture_debug import")
+    else:
+        FAIL("get_last_capture_debug import", f"expected dict, got {type(debug_info)}")
+except Exception as e:
+    FAIL("get_last_capture_debug import", str(e))
+
 # Check __init__.py exports
 try:
     import server.process.read_aloud as ra_mod
-    for name in ['capture_selected_text', 'split_into_sentences',
+    for name in ['capture_selected_text', 'get_last_capture_debug', 'split_into_sentences',
                  'ReadAloudManager', 'get_read_aloud_manager']:
         assert hasattr(ra_mod, name), f"Missing export: {name}"
     PASS("__init__.py exports all public names")
@@ -434,7 +444,7 @@ if manifest_path.exists():
 
 
 # ── TEST 11: ReadAloudManager advance() method ────────────────
-section("TEST 11: advance() method")
+section("TEST 11: advance_index() method")
 
 mgr4 = ReadAloudManager()
 mgr4.state.start_reading("First. Second. Third.")
@@ -445,23 +455,23 @@ if sent and "First" in sent:
 else:
     FAIL("current_sentence", f"got '{sent}'")
 
-next_s = mgr4.state.advance()
+next_s = mgr4.state.current_sentence if mgr4.state.advance_index() else None
 if next_s and "Second" in next_s:
-    PASS("advance() returns second sentence")
+    PASS("advance_index() moves to second sentence")
 else:
-    FAIL("advance()", f"got '{next_s}'")
+    FAIL("advance_index()", f"got '{next_s}'")
 
-next_s2 = mgr4.state.advance()
+next_s2 = mgr4.state.current_sentence if mgr4.state.advance_index() else None
 if next_s2 and "Third" in next_s2:
-    PASS("advance() returns third sentence")
+    PASS("advance_index() moves to third sentence")
 else:
-    FAIL("advance()", f"got '{next_s2}'")
+    FAIL("advance_index()", f"got '{next_s2}'")
 
-next_s3 = mgr4.state.advance()
-if next_s3 is None and mgr4.state.status == ReadAloudStatus.IDLE:
-    PASS("advance() returns None when done, IDLE")
+more = mgr4.state.advance_index()
+if not more and mgr4.state.status == ReadAloudStatus.IDLE:
+    PASS("advance_index() returns False when done, IDLE")
 else:
-    FAIL("advance() end", f"next={next_s3}, status={mgr4.state.status}")
+    FAIL("advance_index() end", f"more={more}, status={mgr4.state.status}")
 
 
 # ── TEST 12: Thread safety smoke test ─────────────────────────

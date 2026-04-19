@@ -82,6 +82,16 @@ def extract_and_store(user_text: str, assistant_text: str,
                         if isinstance(fact, str) and len(fact) > 5:
                             store.add_fact(fact, subject=speaker, speaker=speaker)
                             print(f"[Memory] Learned: {fact}")
+                            # Also populate structured bio table (Phase 5 — Synthetic_Heart)
+                            if speaker and speaker not in {"Unknown", None}:
+                                try:
+                                    from server.process.memory.bio_manager import (
+                                        ensure_speaker, add_fact as bio_add_fact,
+                                    )
+                                    ensure_speaker(speaker)
+                                    bio_add_fact(speaker, fact)
+                                except Exception as _be:
+                                    pass  # non-fatal
             except (json.JSONDecodeError, ValueError):
                 pass
 
@@ -93,6 +103,12 @@ def extract_and_store(user_text: str, assistant_text: str,
         if user_text and len(user_text.strip()) > 5:
             store.add_conversation(f"User said: {user_text.strip()}", speaker=speaker)
             print(f"[Memory] Stored user message for recall")
+
+        # 3) Self-compress if conversations collection is getting large
+        try:
+            store.compress_if_needed(threshold=500)
+        except Exception as _ce:
+            print(f"[Memory] Compression skipped (non-fatal): {_ce}")
 
     thread = threading.Thread(target=_do_extract, daemon=True,
                               name="memory-extract")

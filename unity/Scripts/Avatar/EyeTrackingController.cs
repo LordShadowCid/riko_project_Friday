@@ -133,7 +133,9 @@ namespace Annabeth.Avatar
             Vector3 headPos = _headBone.position;
             Vector3 toCamera = (mainCamera.transform.position - headPos).normalized;
 
-            float horizontalOffset = normalizedX * Mathf.Tan(maxHorizontalAngle * Mathf.Deg2Rad) * lookAtDistance;
+            // Negate horizontal: camera faces -Z (180° Y), so camera.right is world -X.
+            // Without negation, mouse-right maps to character-right (viewer's left) = inverted.
+            float horizontalOffset = -normalizedX * Mathf.Tan(maxHorizontalAngle * Mathf.Deg2Rad) * lookAtDistance;
             float verticalOffset = normalizedY * Mathf.Tan(maxVerticalAngle * Mathf.Deg2Rad) * lookAtDistance;
 
             _targetLookAt = headPos + toCamera * lookAtDistance +
@@ -168,7 +170,9 @@ namespace Annabeth.Avatar
             float ny = (mousePos.y / Screen.height) * 2f - 1f;
 
             // Target yaw/pitch for spine chain
-            float targetYaw = nx * spineMaxYaw;
+            // Negate yaw: camera faces -Z, so positive yaw turns character toward +X
+            // which appears as LEFT on screen. Negate to match mouse direction.
+            float targetYaw = -nx * spineMaxYaw;
             float targetPitch = -ny * spineMaxPitch;
 
             float dt = Time.deltaTime;
@@ -177,25 +181,25 @@ namespace Annabeth.Avatar
 
             float w = spineBlend;
 
-            // Apply cascading rotation — each bone gets a fraction
+            // Apply cascading rotation from original base — each bone gets a fraction
             if (_spine)
             {
                 Quaternion rot = Quaternion.Euler(_currentBodyPitch * w, _currentBodyYaw * w, 0f);
-                _spine.localRotation = _spine.localRotation * rot;
+                _spine.localRotation = _origSpine * rot;
             }
 
             if (_chest)
             {
                 float cm = chestMultiplier;
                 Quaternion rot = Quaternion.Euler(_currentBodyPitch * w * cm, _currentBodyYaw * w * cm, 0f);
-                _chest.localRotation = _chest.localRotation * rot;
+                _chest.localRotation = _origChest * rot;
             }
 
             if (_upperChest && _upperChest != _chest)
             {
                 float ucm = upperChestMultiplier;
                 Quaternion rot = Quaternion.Euler(_currentBodyPitch * w * ucm, _currentBodyYaw * w * ucm, 0f);
-                _upperChest.localRotation = _upperChest.localRotation * rot;
+                _upperChest.localRotation = _origUpperChest * rot;
             }
         }
 
@@ -259,7 +263,10 @@ namespace Annabeth.Avatar
             switch (mode)
             {
                 case TrackingMode.Normal:
-                    enableEyeTracking = true;
+                    // Respect the user's saved mouse tracking toggle.
+                    // If they disabled tracking in settings, don't re-enable it.
+                    var settings = Core.SettingsManager.Instance;
+                    enableEyeTracking = settings != null ? settings.data.enableMouseTracking : true;
                     break;
                 case TrackingMode.Reduced:
                     enableEyeTracking = true;

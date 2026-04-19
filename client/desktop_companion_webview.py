@@ -9,7 +9,9 @@ import os
 import threading
 import http.server
 import socketserver
+from functools import partial
 from pathlib import Path
+from queue import Queue
 
 from PyQt6.QtWidgets import QApplication, QMainWindow, QSystemTrayIcon, QMenu
 from PyQt6.QtCore import Qt, QUrl, QPoint, QTimer, QObject, pyqtSlot, pyqtSignal
@@ -17,6 +19,8 @@ from PyQt6.QtGui import QColor, QIcon, QAction, QKeySequence, QShortcut
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from PyQt6.QtWebChannel import QWebChannel
+
+from server.process.read_aloud.text_capture import register_companion_hwnd
 
 # Try to import keyboard for global hotkeys
 try:
@@ -59,17 +63,27 @@ class QuietHTTPHandler(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
 
 
-def start_http_server(directory: str, port: int = 8765):
+def start_http_server(directory: str, port: int = 8765, ready_event=None, error_queue=None, server_queue=None):
     """Start HTTP server in background thread."""
-    os.chdir(directory)
-    handler = QuietHTTPHandler
+    handler = partial(QuietHTTPHandler, directory=directory)
     
     # Allow port reuse to avoid "Address already in use" errors
     socketserver.TCPServer.allow_reuse_address = True
     
-    with socketserver.TCPServer(("", port), handler) as httpd:
-        print(f"HTTP server running at http://localhost:{port}")
-        httpd.serve_forever()
+    try:
+        with socketserver.TCPServer(("", port), handler) as httpd:
+            print(f"HTTP server running at http://localhost:{port}")
+            if server_queue is not None:
+                server_queue.put(httpd)
+            if ready_event is not None:
+                ready_event.set()
+            httpd.serve_forever()
+    except Exception as exc:
+        if error_queue is not None:
+            error_queue.put(exc)
+        if ready_event is not None:
+            ready_event.set()
+        raise
 
 class TransparentWebEnginePage(QWebEnginePage):
     """Custom page with transparent background."""
@@ -531,20 +545,31 @@ def main():
     # Start HTTP server for serving files
     project_root = Path(__file__).parent.parent.absolute()
     server_port = 8766  # Use different port to avoid conflicts
+    server_ready = threading.Event()
+    server_error = Queue(maxsize=1)
+    server_queue = Queue(maxsize=1)
     
     server_thread = threading.Thread(
         target=start_http_server,
-        args=(str(project_root), server_port),
+        args=(str(project_root), server_port, server_ready, server_error, server_queue),
         daemon=True
     )
     server_thread.start()
-    
-    # Give server time to start
-    import time
-    time.sleep(0.3)
+
+    if not server_ready.wait(timeout=5):
+        raise RuntimeError("Desktop companion HTTP server timed out during startup")
+
+    if not server_error.empty():
+        raise RuntimeError(f"Desktop companion HTTP server failed to start: {server_error.get()}")
+
+    httpd = server_queue.get_nowait()
     
     # Create window that loads from HTTP server
     window = DesktopCompanionWindow()
+    try:
+        register_companion_hwnd(int(window.winId()))
+    except Exception as exc:
+        print(f"[ReadAloud] Failed to register companion HWND: {exc}")
     
     # Load the companion.html from HTTP server
     url = f"http://localhost:{server_port}/client/companion.html"
@@ -579,6 +604,9 @@ def main():
     
     result = app.exec()
     hotkey_manager.cleanup()
+    httpd.shutdown()
+    httpd.server_close()
+    server_thread.join(timeout=5)
     sys.exit(result)
 
 

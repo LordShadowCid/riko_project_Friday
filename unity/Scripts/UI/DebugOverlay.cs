@@ -58,6 +58,10 @@ namespace Annabeth.UI
         {
             if (UnityEngine.Input.GetKeyDown(KeyCode.F1))
                 _visible = !_visible;
+
+            // Auto-update status when WebSocket connects (server may not send debug_status)
+            if (_status == "Initializing..." && webSocketClient != null && webSocketClient.IsConnected)
+                _status = "Connected \u2014 Listening";
         }
 
         private void HandleDebugStatus(string status, string userText, string responseText)

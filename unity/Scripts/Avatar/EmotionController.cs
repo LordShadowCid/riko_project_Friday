@@ -1,11 +1,13 @@
 using UnityEngine;
 using UniVRM10;
+using System.Collections.Generic;
 
 namespace Annabeth.Avatar
 {
     /// <summary>
     /// Controls emotion expressions using VRM BlendShapes.
     /// Maps emotion strings to VRM expression presets.
+    /// Phase 2: Also handles [em_NAME:INTENSITY] inline expressions from server.
     /// </summary>
     public class EmotionController : MonoBehaviour
     {
@@ -100,5 +102,58 @@ namespace Annabeth.Avatar
         }
 
         public string GetCurrentEmotion() => _currentEmotion;
+
+        // ----------------------------------------------------------------
+        // Phase 2: Inline facial expression timeline support
+        // Maps [em_NAME:INTENSITY] tag names -> VRM ExpressionKey names
+        // ----------------------------------------------------------------
+
+        private static readonly Dictionary<string, ExpressionKey> _exprMap =
+            new Dictionary<string, ExpressionKey>
+        {
+            { "smile",     ExpressionKey.Happy      },
+            { "grin",      ExpressionKey.Happy      },
+            { "sad",       ExpressionKey.Sad        },
+            { "blush",     ExpressionKey.Relaxed    },
+            { "surprised", ExpressionKey.Surprised  },
+            { "angry",     ExpressionKey.Angry      },
+            { "wink",      ExpressionKey.BlinkLeft  },
+            { "shy",       ExpressionKey.Relaxed    },
+            { "neutral",   ExpressionKey.Neutral    },
+            { "thinking",  ExpressionKey.Neutral    },
+            { "happy",     ExpressionKey.Happy      },
+        };
+
+        /// <summary>
+        /// Apply a transient facial expression from the server timeline.
+        /// Pass name=null or intensity=0 to reset all expressions.
+        /// </summary>
+        public void SetExpression(string name, float intensity)
+        {
+            if (_expression == null) return;
+
+            if (string.IsNullOrEmpty(name) || intensity <= 0f)
+            {
+                ResetExpressions();
+                return;
+            }
+
+            name = name.ToLower().Trim();
+            if (!_exprMap.TryGetValue(name, out ExpressionKey key))
+            {
+                Debug.LogWarning($"[EmotionController] Unknown expression: {name}");
+                return;
+            }
+
+            _expression.SetWeight(key, Mathf.Clamp01(intensity));
+        }
+
+        /// <summary>Reset all expression-map blend shapes to zero.</summary>
+        public void ResetExpressions()
+        {
+            if (_expression == null) return;
+            foreach (var key in _exprMap.Values)
+                _expression.SetWeight(key, 0f);
+        }
     }
 }

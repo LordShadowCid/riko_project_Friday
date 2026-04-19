@@ -11,6 +11,7 @@ Includes RAM-based response caching for faster repeated queries.
 import json
 import os
 import re
+import time
 import hashlib
 from collections import OrderedDict
 from typing import Generator, Callable
@@ -28,7 +29,7 @@ char_config = load_config()
 # ============ TTS Sentence Chunking ============
 # Break long sentences at natural pause points to reduce TTS latency spikes
 
-def chunk_long_sentence(sentence: str, max_chars: int = 250) -> list[str]:
+def chunk_long_sentence(sentence: str, max_chars: int = 150) -> list[str]:
     """
     Break long sentences at natural pause points (commas, semicolons, colons).
     This reduces TTS latency spikes on long sentences.
@@ -125,7 +126,7 @@ def _is_repetition(candidate: str, recent_texts: list[str], threshold: float = 0
         return False
     from difflib import SequenceMatcher
     norm = candidate.strip().lower()
-    prefix = norm[:120]  # First ~120 chars catch "same opener" pattern
+    prefix = norm[:40]  # Short prefix catches "same opener word" pattern
     for prev in recent_texts:
         if not prev:
             continue
@@ -133,9 +134,9 @@ def _is_repetition(candidate: str, recent_texts: list[str], threshold: float = 0
         if SequenceMatcher(None, norm, prev).ratio() >= threshold:
             return True
         # Prefix similarity — catches same-start-different-gibberish-tail
-        if len(prefix) > 40 and len(prev) > 40:
-            prev_prefix = prev[:120]
-            if SequenceMatcher(None, prefix, prev_prefix).ratio() >= 0.85:
+        if len(prefix) > 10 and len(prev) > 10:
+            prev_prefix = prev[:40]
+            if SequenceMatcher(None, prefix, prev_prefix).ratio() >= 0.70:
                 return True
     return False
 
@@ -561,8 +562,14 @@ def _match_and_run_tools(user_input: str, speaker_name: str = "Unknown") -> str 
             r"\bwhat are\b", r"\bhow (do|does|to|can)\b",
         ]
         if any(_re.search(p, text) for p in search_patterns):
+            # Skip web search for math expressions and personal/opinion questions
+            _skip_search = (
+                _re.search(r"\d+\s*[\+\-\*\/x×÷]\s*\d+", text)  # math operators
+                or _re.search(r"\b(plus|minus|times|divided by)\b", text)  # math words
+                or _re.search(r"\b(your (favorite|opinion|take|thought)|do you (think|like|prefer|feel))\b", text)
+            )
             # Only trigger web search for genuine questions, not conversational
-            if len(text) > 15 and "?" in user_input:
+            if not _skip_search and len(text) > 15 and "?" in user_input:
                 result = execute_web_search(query=user_input)
                 if "failed" not in result.lower():
                     results.append(f"[Web search]\n{result}")
@@ -735,7 +742,7 @@ def get_annabeth_response(messages):
             self.output_text = text
 
     try:
-        r = requests.post(f"{settings['host']}/api/chat", json=chat_payload, timeout=60)
+        r = requests.post(f"{settings['host']}/api/chat", json=chat_payload, timeout=180)
         if r.status_code == 404:
             raise requests.HTTPError("/api/chat not supported", response=r)
         r.raise_for_status()
@@ -756,7 +763,7 @@ def get_annabeth_response(messages):
         return _OllamaResp(str((data2 or {}).get("response") or ""))
 
 
-def stream_ollama_response(messages, temp_boost: float = 0.0) -> Generator[str, None, str]:
+def stream_ollama_response(messages, temp_boost: float = 0.0, num_predict: int = -1, model_override: str | None = None) -> Generator[str, None, str]:
     """
     Stream response from Ollama, yielding complete sentences as they arrive.
     Returns the full response text at the end.
@@ -764,10 +771,12 @@ def stream_ollama_response(messages, temp_boost: float = 0.0) -> Generator[str, 
     Args:
         messages: Chat messages to send to Ollama
         temp_boost: Additional temperature to add (for breaking repetition loops)
+        model_override: If set, use this model instead of the one in char_config
     
     Yields sentences as they complete (ending with .!? or newline).
     """
     settings = _get_ollama_settings(char_config)
+    active_model = model_override or settings["model"]
     
     options = {
         "num_ctx": settings["num_ctx"],
@@ -778,13 +787,13 @@ def stream_ollama_response(messages, temp_boost: float = 0.0) -> Generator[str, 
         # NOTE: 1.5 caused garbled text — 1.35 balances repetition vs coherence.
         "repeat_penalty": 1.35,
         "repeat_last_n": 512,
-        "num_predict": 300,  # Cap response length to reduce slowness & rambling
+        "num_predict": num_predict,  # Intent-driven: -1=unlimited, or capped for fast replies
     }
     if temp_boost > 0:
         options["temperature"] = 0.7 + temp_boost  # Default ~0.7, boost from there
     
     chat_payload = {
-        "model": settings["model"],
+        "model": active_model,
         "messages": _messages_to_role_content(messages),
         "stream": True,
         "keep_alive": settings["keep_alive"],
@@ -797,7 +806,7 @@ def stream_ollama_response(messages, temp_boost: float = 0.0) -> Generator[str, 
     # Primary: sentence endings. Secondary: mid-sentence breaks for long buffers.
     sentence_pattern = re.compile(r'([.!?]+[\s\n]+|[\n]+)')
     mid_break_pattern = re.compile(r'([,;:]\s+|—\s*|\s-\s)')
-    EAGER_FLUSH_LEN = 80  # Flush at mid-sentence break if buffer exceeds this
+    EAGER_FLUSH_LEN = 25  # Flush at mid-sentence break if buffer exceeds this (was 40)
     
     try:
         with requests.post(
@@ -911,6 +920,7 @@ def llm_response_streaming(user_input, on_sentence: Callable[[str], None] = None
     Returns the full response text.
     
     Uses RAM cache for faster repeated queries when enabled.
+    Uses intent classification to adjust num_predict per turn.
     
     Args:
         user_input: User's message
@@ -920,6 +930,67 @@ def llm_response_streaming(user_input, on_sentence: Callable[[str], None] = None
     Returns:
         Full response text
     """
+    # Intent classification — adjust LLM params per turn (runs in ~1ms on CPU)
+    from server.process.agents.intent_classifier import classify_intent
+    intent = classify_intent(user_input)
+    intent_num_predict = intent.num_predict
+    intent_temp_adjust = intent.temp_adjust
+    print(f"[Intent] {intent.category} -> num_predict={intent_num_predict}, temp_adj={intent_temp_adjust:+.1f}")
+
+    # Model routing — select fast model for simple intents
+    try:
+        from server.process.llm_funcs.model_router import get_model_router
+        _router = get_model_router()
+        routed_model = _router.get_model_for_intent(intent.category)
+        if routed_model != _router.primary_model():
+            print(f"[ModelRouter] Using fast model '{routed_model}' for intent '{intent.category}'")
+    except Exception:
+        routed_model = None  # Use default from char_config
+
+    # Wrap on_sentence to: (a) update emotion state per sentence, (b) strip tags before TTS
+    if on_sentence is not None:
+        _on_sentence_raw = on_sentence
+        def on_sentence(text: str) -> None:  # noqa: F811
+            try:
+                from server.process.memory.emotion_state import (
+                    strip_emotion_tags as _strip,
+                    extract_emotion_tags as _extract,
+                    set_emotions_from_dict as _set_emotions,
+                )
+                # Update emotion state for tags found in THIS sentence chunk (Phase 2 streaming)
+                tags = _extract(text)
+                if tags:
+                    _set_emotions(tags)
+                    # Broadcast dominant emotion to Unity so face changes immediately
+                    try:
+                        from server.process.memory.emotion_state import get_dominant_emotion
+                        from server.main_chat import avatar_api, avatar_loop
+                        import asyncio
+                        _dom = get_dominant_emotion()
+                        if _dom and avatar_api and avatar_loop:
+                            asyncio.run_coroutine_threadsafe(
+                                avatar_api['set_emotion'](_dom), avatar_loop
+                            )
+                    except Exception:
+                        pass
+                text = _strip(text)
+            except Exception:
+                pass
+            # Strip facial expression tags (Phase 2) before sending to TTS,
+            # and schedule the broadcasts so Unity sees them.
+            try:
+                from server.process.llm_funcs.facial_expressions import (
+                    parse_facial_expressions as _pfe,
+                    play_expression_timeline_sync as _play_expr,
+                )
+                text, _face_events = _pfe(text)
+                if _face_events:
+                    _play_expr(_face_events, len(text))
+            except Exception:
+                pass
+            if text:
+                _on_sentence_raw(text)
+
     messages = load_history()
     
     # Format the message with speaker info if available
@@ -971,13 +1042,13 @@ def llm_response_streaming(user_input, on_sentence: Callable[[str], None] = None
         try:
             from server.process.memory.memory_store import get_memory_store
             store = get_memory_store()
-            memories = store.recall_all(user_input, n_results=3)
+            memories = store.recall_all(user_input, n_results=5)
             if memories:
                 memory_lines = [m["text"] for m in memories if m.get("text")]
                 if memory_lines:
                     memory_context = (
                         "You remember the following from past conversations:\n- "
-                        + "\n- ".join(memory_lines[:2])
+                        + "\n- ".join(memory_lines[:3])
                         + "\nUse these memories naturally if relevant. "
                         "Don't force them into the conversation."
                     )
@@ -991,6 +1062,58 @@ def llm_response_streaming(user_input, on_sentence: Callable[[str], None] = None
         return llm_msgs
 
     llm_messages = _build_llm_messages(messages, inject_memories=True)
+
+    # --- Bio context injection ---
+    if speaker_name and speaker_name not in {"Unknown", None}:
+        try:
+            from server.process.memory.bio_manager import get_bio, update_last_seen
+            update_last_seen(speaker_name)
+            bio_context = get_bio(speaker_name)
+            if bio_context:
+                llm_messages.insert(-1, {
+                    "role": "system",
+                    "content": [{"type": "input_text", "text": f"Speaker profile: {bio_context}"}]
+                })
+                print(f"[Bio] Injected bio for {speaker_name}")
+        except Exception as e:
+            print(f"[Bio] Bio injection failed (non-fatal): {e}")
+
+    # --- Emotion context injection (Phase 2 — Synthetic_Heart) ---
+    try:
+        from server.process.memory.emotion_state import get_emotion_context
+        emotion_ctx = get_emotion_context()
+        if emotion_ctx:
+            llm_messages.insert(-1, {
+                "role": "system",
+                "content": [{"type": "input_text", "text": emotion_ctx}]
+            })
+    except Exception as e:
+        print(f"[Emotion] Context injection failed (non-fatal): {e}")
+
+    # --- Diary context injection (Phase 3 — Synthetic_Heart) ---
+    try:
+        from server.process.memory.reflection_loop import get_diary_context
+        diary_ctx = get_diary_context(n=2)
+        if diary_ctx:
+            llm_messages.insert(-1, {
+                "role": "system",
+                "content": [{"type": "input_text", "text": diary_ctx}]
+            })
+    except Exception as e:
+        print(f"[Diary] Context injection failed (non-fatal): {e}")
+
+    # --- Facial expression hint (Phase 2 — Synthetic_Heart) ---
+    try:
+        from server.settings_registry import registry as _reg
+        if _reg.get("FACIAL_EXPR_ENABLED"):
+            from server.process.llm_funcs.facial_expressions import FACIAL_EXPR_INJECT
+            llm_messages[0] = {
+                "role": "system",
+                "content": [{"type": "input_text", "text":
+                    _content_to_text(llm_messages[0].get("content", "")) + FACIAL_EXPR_INJECT}]
+            }
+    except Exception as e:
+        print(f"[FacialExpr] Prompt inject failed (non-fatal): {e}")
 
     # --- Personality overlay (from self-modification) ---
     personality_snippet = _get_personality_overlay()
@@ -1015,6 +1138,35 @@ def llm_response_streaming(user_input, on_sentence: Callable[[str], None] = None
             })
             print(f"[Tools] Injected tool context into LLM messages")
 
+    # --- Browser selection context (text highlighted in browser extension) ---
+    try:
+        from shared import get_companion_state as _get_cs
+        _browser_text = _get_cs().take_browser_selected_text()
+        if _browser_text:
+            llm_messages.insert(-1, {
+                "role": "system",
+                "content": [{"type": "input_text", "text":
+                    f"The user has highlighted this text in their browser:\n\n\"{_browser_text}\"\n\n"
+                    f"Reference it naturally if their question is about it."}]
+            })
+            print(f"[Browser] Injected selection context ({len(_browser_text)} chars)")
+    except Exception as e:
+        print(f"[Browser] Context injection failed (non-fatal): {e}")
+
+    # --- Verbose permission for long-form requests (story / detailed intents) ---
+    # The system prompt says "1-3 sentences usually", which the LLM obeys even
+    # when the user explicitly asks for something long. Override that here.
+    if intent.category in ("story", "detailed"):
+        llm_messages.insert(-1, {
+            "role": "system",
+            "content": [{"type": "input_text", "text":
+                "The user has asked for a long or detailed response. "
+                "Go ahead and give a full, complete answer — the usual brevity "
+                "guideline does NOT apply here. Tell the full story, complete the "
+                "explanation, or provide all the detail they asked for."}]
+        })
+        print(f"[LLM] Verbose permission injected for intent '{intent.category}'")
+
     # Collect recent assistant responses for post-generation repetition check.
     # Merge file history with in-memory deque for completeness.
     history_responses = [
@@ -1037,6 +1189,7 @@ def llm_response_streaming(user_input, on_sentence: Callable[[str], None] = None
     max_retries = 2
     temp_boost = 0.0
     is_repeat = False
+    _llm_t0 = time.time()
 
     # --- Pre-generation: always deduplicate history ---
     # Removes near-identical assistant responses so the LLM doesn't see an
@@ -1046,8 +1199,8 @@ def llm_response_streaming(user_input, on_sentence: Callable[[str], None] = None
     # Mild temperature nudge when recent responses share the same opening.
     if len(recent_responses) >= 2:
         from difflib import SequenceMatcher as _SM
-        if _SM(None, recent_responses[0][:120], recent_responses[1][:120]).ratio() >= 0.80:
-            temp_boost = 0.15
+        if _SM(None, recent_responses[0][:40], recent_responses[1][:40]).ratio() >= 0.65:
+            temp_boost = 0.20
             print(f"[LLM] Similar recent openings — temp_boost={temp_boost}")
 
     for attempt in range(max_retries + 1):
@@ -1086,9 +1239,9 @@ def llm_response_streaming(user_input, on_sentence: Callable[[str], None] = None
             early_abort = False
             prefix_checked = False
             buffered_sentences = []  # Hold back until prefix check passes
-            _EARLY_CHECK_LEN = 40   # Chars needed before we can check
+            _EARLY_CHECK_LEN = 60   # Chars needed before we can check (was 40; too short caused false positives)
 
-            for sentence in stream_ollama_response(llm_messages, temp_boost=temp_boost):
+            for sentence in stream_ollama_response(llm_messages, temp_boost=temp_boost + intent_temp_adjust, num_predict=intent_num_predict, model_override=routed_model):
                 if not full_text:
                     full_text = sentence
                 else:
@@ -1106,7 +1259,7 @@ def llm_response_streaming(user_input, on_sentence: Callable[[str], None] = None
                                 continue
                             check_len = min(len(prefix_so_far), len(prev))
                             ratio = _SM2(None, prefix_so_far[:check_len], prev[:check_len]).ratio()
-                            if ratio >= 0.75:
+                            if ratio >= 0.85:
                                 early_abort = True
                                 print(f"[LLM] Early repeat detected after {len(buffered_sentences)} sentence(s), {len(prefix_so_far)} chars (ratio={ratio:.2f}) -- aborting")
                                 break
@@ -1128,6 +1281,23 @@ def llm_response_streaming(user_input, on_sentence: Callable[[str], None] = None
                 # Subsequent sentences stream normally
                 if on_sentence:
                     on_sentence(sentence)
+
+                # Mid-stream repeat check every ~200 chars to catch repeats
+                # that slip past the initial 60-char prefix check
+                if len(full_text) >= 200 and len(full_text) % 200 < 80 and recent_responses:
+                    from difflib import SequenceMatcher as _SM3
+                    mid_text = full_text.strip().lower()
+                    for prev in recent_responses:
+                        if len(prev) < 100:
+                            continue
+                        check_len = min(len(mid_text), len(prev))
+                        ratio = _SM3(None, mid_text[:check_len], prev[:check_len]).ratio()
+                        if ratio >= 0.80:
+                            early_abort = True
+                            print(f"[LLM] Mid-stream repeat detected at {len(mid_text)} chars (ratio={ratio:.2f}) -- aborting")
+                            break
+                    if early_abort:
+                        break
 
             # If we never reached the check threshold (very short response),
             # flush whatever we buffered
@@ -1165,6 +1335,18 @@ def llm_response_streaming(user_input, on_sentence: Callable[[str], None] = None
             break
 
     was_fallback = _is_fallback_like(full_text)
+    # Record latency for model auto-routing
+    try:
+        from server.process.llm_funcs.model_router import record_latency
+        record_latency(int((time.time() - _llm_t0) * 1000))
+    except Exception:
+        pass
+
+    # NOTE: Facial expression tags and emotion tags are already processed
+    # per-sentence in the on_sentence wrapper during streaming. The post-stream
+    # blocks were removed because on_sentence strips [em_xxx] tags before they
+    # reach full_text (making the facial expr re-parse a no-op) and re-applying
+    # emotions from full_text was redundant with the per-sentence broadcast.
 
     # Record in in-memory deque for cross-turn tracking
     if full_text and not was_fallback:

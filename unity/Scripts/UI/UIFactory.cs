@@ -1,26 +1,43 @@
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.EventSystems;
+using UnityEngine.InputSystem.UI;
 
 namespace Annabeth.UI
 {
     /// <summary>
     /// Runtime UI factory — creates Canvas, buttons, sliders, toggles, labels, panels, etc.
     /// All Phase 2+ UI scripts use this so nothing needs to be wired in the Editor.
+    /// Colors are served by ThemeManager when available, falling back to defaults.
     /// </summary>
     public static class UIFactory
     {
-        // ── Colors ──────────────────────────────────────────────
-        public static readonly Color PanelBg       = new Color(0.10f, 0.10f, 0.12f, 0.92f);
-        public static readonly Color ButtonNormal   = new Color(0.22f, 0.22f, 0.26f, 1f);
-        public static readonly Color ButtonHover    = new Color(0.30f, 0.30f, 0.36f, 1f);
-        public static readonly Color ButtonPress    = new Color(0.18f, 0.18f, 0.22f, 1f);
-        public static readonly Color SliderBg       = new Color(0.20f, 0.20f, 0.24f, 1f);
-        public static readonly Color SliderFill     = new Color(0.45f, 0.65f, 0.95f, 1f);
-        public static readonly Color SliderHandle   = new Color(0.80f, 0.80f, 0.85f, 1f);
-        public static readonly Color ToggleCheckmark = new Color(0.45f, 0.85f, 0.55f, 1f);
-        public static readonly Color TextColor      = new Color(0.90f, 0.90f, 0.92f, 1f);
-        public static readonly Color HeaderColor    = new Color(0.55f, 0.75f, 1f, 1f);
-        public static readonly Color Separator      = new Color(0.30f, 0.30f, 0.35f, 0.6f);
+        // ── Default Colors (fallback when ThemeManager not yet initialized) ──
+        private static readonly Color DefaultPanelBg       = new Color(0.10f, 0.10f, 0.12f, 0.92f);
+        private static readonly Color DefaultButtonNormal   = new Color(0.22f, 0.22f, 0.26f, 1f);
+        private static readonly Color DefaultButtonHover    = new Color(0.30f, 0.30f, 0.36f, 1f);
+        private static readonly Color DefaultButtonPress    = new Color(0.18f, 0.18f, 0.22f, 1f);
+        private static readonly Color DefaultSliderBg       = new Color(0.20f, 0.20f, 0.24f, 1f);
+        private static readonly Color DefaultSliderFill     = new Color(0.45f, 0.65f, 0.95f, 1f);
+        private static readonly Color DefaultSliderHandle   = new Color(0.80f, 0.80f, 0.85f, 1f);
+        private static readonly Color DefaultToggleCheckmark = new Color(0.45f, 0.85f, 0.55f, 1f);
+        private static readonly Color DefaultTextColor      = new Color(0.90f, 0.90f, 0.92f, 1f);
+        private static readonly Color DefaultHeaderColor    = new Color(0.55f, 0.75f, 1f, 1f);
+        private static readonly Color DefaultSeparator      = new Color(0.30f, 0.30f, 0.35f, 0.6f);
+
+        // ── Themed color accessors ──────────────────────────────
+        private static ThemeManager TM => ThemeManager.Instance;
+        public static Color PanelBg        => TM != null ? TM.PanelBg : DefaultPanelBg;
+        public static Color ButtonNormal   => TM != null ? TM.ButtonNormal : DefaultButtonNormal;
+        public static Color ButtonHover    => TM != null ? TM.ButtonHover : DefaultButtonHover;
+        public static Color ButtonPress    => TM != null ? TM.ButtonPress : DefaultButtonPress;
+        public static Color SliderBg       => TM != null ? TM.SliderBg : DefaultSliderBg;
+        public static Color SliderFill     => TM != null ? TM.SliderFill : DefaultSliderFill;
+        public static Color SliderHandle   => TM != null ? TM.SliderHandle : DefaultSliderHandle;
+        public static Color ToggleCheckmark => TM != null ? TM.ToggleCheckmark : DefaultToggleCheckmark;
+        public static Color TextColor      => TM != null ? TM.TextColor : DefaultTextColor;
+        public static Color HeaderColor    => TM != null ? TM.HeaderColor : DefaultHeaderColor;
+        public static Color Separator      => TM != null ? TM.Separator : DefaultSeparator;
 
         private static Font _cachedFont;
         private static Font DefaultFont
@@ -51,7 +68,21 @@ namespace Annabeth.UI
             scaler.matchWidthOrHeight = 0.5f;
 
             go.AddComponent<GraphicRaycaster>();
+
+            // Ensure an EventSystem exists (required for UI clicks)
+            EnsureEventSystem();
+
             return canvas;
+        }
+
+        /// <summary>Create an EventSystem with InputSystemUIInputModule if none exists.</summary>
+        private static void EnsureEventSystem()
+        {
+            if (EventSystem.current != null) return;
+
+            var esGo = new GameObject("EventSystem");
+            esGo.AddComponent<EventSystem>();
+            esGo.AddComponent<InputSystemUIInputModule>();
         }
 
         // ── Panel ───────────────────────────────────────────────
@@ -68,6 +99,9 @@ namespace Annabeth.UI
             var img = go.AddComponent<Image>();
             img.color = bgColor ?? PanelBg;
             img.raycastTarget = true;
+
+            if (bgColor == null)
+                TM?.Track(img, ThemeRole.PanelBg);
 
             return rt;
         }
@@ -94,6 +128,10 @@ namespace Annabeth.UI
             txt.color = color ?? TextColor;
             txt.horizontalOverflow = HorizontalWrapMode.Overflow;
             txt.verticalOverflow = VerticalWrapMode.Overflow;
+
+            if (color == null)
+                TM?.Track(txt, ThemeRole.TextColor);
+
             return txt;
         }
 
@@ -122,6 +160,9 @@ namespace Annabeth.UI
 
             // Label
             var txt = CreateText(go.transform, "Label", label, fontSize, TextAnchor.MiddleCenter);
+
+            TM?.TrackButton(btn);
+
             return btn;
         }
 
@@ -163,6 +204,9 @@ namespace Annabeth.UI
             toggle.targetGraphic = bgImg;
             toggle.graphic = cmImg;
             toggle.isOn = false;
+
+            TM?.Track(bgImg, ThemeRole.SliderBg);
+            TM?.Track(cmImg, ThemeRole.ToggleCheckmark);
 
             // Label text
             var labelGo = new GameObject("Label");
@@ -236,6 +280,8 @@ namespace Annabeth.UI
             var bgImgS = bgGo.AddComponent<Image>();
             bgImgS.color = SliderBg;
 
+            TM?.Track(bgImgS, ThemeRole.SliderBg);
+
             // Fill area
             var fillArea = new GameObject("Fill Area");
             fillArea.transform.SetParent(sliderGo.transform, false);
@@ -254,6 +300,8 @@ namespace Annabeth.UI
             var fillImg = fillGo.AddComponent<Image>();
             fillImg.color = SliderFill;
 
+            TM?.Track(fillImg, ThemeRole.SliderFill);
+
             // Handle area
             var handleArea = new GameObject("Handle Slide Area");
             handleArea.transform.SetParent(sliderGo.transform, false);
@@ -269,6 +317,8 @@ namespace Annabeth.UI
             handleRt.sizeDelta = new Vector2(14, 20);
             var handleImg = handleGo.AddComponent<Image>();
             handleImg.color = SliderHandle;
+
+            TM?.Track(handleImg, ThemeRole.SliderHandle);
 
             // Slider component
             var slider = sliderGo.AddComponent<Slider>();
@@ -315,6 +365,9 @@ namespace Annabeth.UI
             txt.fontStyle = FontStyle.Bold;
             txt.alignment = TextAnchor.MiddleLeft;
             txt.color = HeaderColor;
+
+            TM?.Track(txt, ThemeRole.HeaderColor);
+
             return txt;
         }
 
@@ -350,6 +403,8 @@ namespace Annabeth.UI
             rt.sizeDelta = new Vector2(width, 1);
             var img = go.AddComponent<Image>();
             img.color = Separator;
+
+            TM?.Track(img, ThemeRole.Separator);
         }
 
         // ── Input Field ─────────────────────────────────────────
@@ -384,6 +439,8 @@ namespace Annabeth.UI
             fieldLE.flexibleWidth = 0.6f;
             var bg = fieldGO.AddComponent<Image>();
             bg.color = SliderBg;
+
+            TM?.Track(bg, ThemeRole.SliderBg);
 
             // Text child
             var textGO = new GameObject("Text");
@@ -446,9 +503,7 @@ namespace Annabeth.UI
             vpRt.anchorMax = Vector2.one;
             vpRt.offsetMin = Vector2.zero;
             vpRt.offsetMax = Vector2.zero;
-            var vpImg = viewport.AddComponent<Image>();
-            vpImg.color = Color.clear;
-            viewport.AddComponent<Mask>().showMaskGraphic = false;
+            viewport.AddComponent<RectMask2D>();
 
             // Content
             var content = new GameObject("Content");

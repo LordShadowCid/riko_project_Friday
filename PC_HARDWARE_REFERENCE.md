@@ -42,7 +42,7 @@
 | NVIDIA Driver | 595.79 | |
 | ffmpeg | 8.1 (Gyan.FFmpeg via winget) | On PATH |
 | cuDNN | 9.20.0.48 (nvidia-cudnn-cu12 pip) | DLLs in venv, added to PATH by start script |
-| VS Build Tools | **NOT installed** | |
+| VS Build Tools | 2022 Build Tools | Installed at `C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools` |
 
 ## GPU Assignment Plan
 

@@ -11,6 +11,7 @@ namespace Annabeth.Dance
     /// Always has baseline movement; audio makes it more energetic.
     /// Supports blend weight for smooth mode transitions and silence fading.
     /// </summary>
+    [DefaultExecutionOrder(200)]
     public class BeatDanceController : MonoBehaviour, IBlendableAnimation
     {
         [Header("Intensity")]
@@ -72,15 +73,18 @@ namespace Annabeth.Dance
         private Quaternion _origLUA, _origRUA, _origLLA, _origRLA;
         private Quaternion _origLS, _origRS;
 
+        // Whether arm bones come from ControlRig (normalized) vs Animator (raw)
+        private bool _useControlRig;
+
         // Shoulder decay tracking
         private float _leftShoulderX;
         private float _rightShoulderX;
 
         // Relaxed arm poses (matching AvatarController.ApplyRelaxedPose)
-        private static readonly Quaternion RelaxedLUA = Quaternion.Euler(0f, 0f, 55f);
-        private static readonly Quaternion RelaxedRUA = Quaternion.Euler(0f, 0f, -55f);
-        private static readonly Quaternion RelaxedLLA = Quaternion.Euler(0f, -20f, 0f);
-        private static readonly Quaternion RelaxedRLA = Quaternion.Euler(0f, 20f, 0f);
+        private static readonly Quaternion RelaxedLUA = Quaternion.Euler(0f, 0f, 72f);
+        private static readonly Quaternion RelaxedRUA = Quaternion.Euler(0f, 0f, -72f);
+        private static readonly Quaternion RelaxedLLA = Quaternion.Euler(0f, -35f, 0f);
+        private static readonly Quaternion RelaxedRLA = Quaternion.Euler(0f, 35f, 0f);
 
         public bool IsDancing => _isDancing;
 
@@ -105,18 +109,34 @@ namespace Annabeth.Dance
             _animator = vrm?.GetComponent<Animator>();
             if (_animator == null) return;
 
-            // Cache 13 bones
+            // Cache 13 bones — non-arm bones from Animator (small rotations, works fine)
             _head = _animator.GetBoneTransform(HumanBodyBones.Head);
             _neck = _animator.GetBoneTransform(HumanBodyBones.Neck);
             _spine = _animator.GetBoneTransform(HumanBodyBones.Spine);
             _chest = _animator.GetBoneTransform(HumanBodyBones.Chest);
             _hips = _animator.GetBoneTransform(HumanBodyBones.Hips);
-            _leftUpperArm = _animator.GetBoneTransform(HumanBodyBones.LeftUpperArm);
-            _rightUpperArm = _animator.GetBoneTransform(HumanBodyBones.RightUpperArm);
-            _leftLowerArm = _animator.GetBoneTransform(HumanBodyBones.LeftLowerArm);
-            _rightLowerArm = _animator.GetBoneTransform(HumanBodyBones.RightLowerArm);
             _leftShoulder = _animator.GetBoneTransform(HumanBodyBones.LeftShoulder);
             _rightShoulder = _animator.GetBoneTransform(HumanBodyBones.RightShoulder);
+
+            // Arm bones from ControlRig (normalized) — equivalent to three-vrm's
+            // getNormalizedBoneNode(). T-pose = identity rotation, consistent across all VRM models.
+            // Raw Animator bones have model-specific orientations that break large rotations.
+            var rig = _vrm?.Runtime?.ControlRig;
+            if (rig != null)
+            {
+                _leftUpperArm = rig.GetBoneTransform(HumanBodyBones.LeftUpperArm);
+                _rightUpperArm = rig.GetBoneTransform(HumanBodyBones.RightUpperArm);
+                _leftLowerArm = rig.GetBoneTransform(HumanBodyBones.LeftLowerArm);
+                _rightLowerArm = rig.GetBoneTransform(HumanBodyBones.RightLowerArm);
+                _useControlRig = true;
+            }
+            else
+            {
+                _leftUpperArm = _animator.GetBoneTransform(HumanBodyBones.LeftUpperArm);
+                _rightUpperArm = _animator.GetBoneTransform(HumanBodyBones.RightUpperArm);
+                _leftLowerArm = _animator.GetBoneTransform(HumanBodyBones.LeftLowerArm);
+                _rightLowerArm = _animator.GetBoneTransform(HumanBodyBones.RightLowerArm);
+            }
 
             StoreOriginalTransforms();
         }
@@ -236,32 +256,64 @@ namespace Annabeth.Dance
             float audioArmBoost = _highEnergy * 0.5f;
             float armE = (baseArmSway + audioArmBoost) * eff;
 
-            if (_leftUpperArm)
+            if (_useControlRig)
             {
-                float rz = 1.2f + Mathf.Sin(_armSwayPhase) * 0.3f * armE;
-                float rx = -Mathf.Sin(_armSwayPhase * 0.7f) * 0.2f * armE;
-                float ry = -1.0f;
-                _leftUpperArm.localRotation = _origLUA * Quaternion.Euler(rx * Mathf.Rad2Deg, ry * Mathf.Rad2Deg, rz * Mathf.Rad2Deg);
+                // ControlRig normalized bones — absolute rotations (rest = identity).
+                // Conversion from three.js right-handed VRM to Unity left-handed ControlRig:
+                //   Z-flip (diag(1,1,-1)) requires: negate X, negate Y, keep Z.
+                // JS values: leftUpperArm.rotation = Euler(-sin*0.2*armE, -1.0, 1.2+sin*0.3*armE, 'XYZ')
+                // Unity:     EulerXYZ(+sin*0.2*armE, +0.7, 1.2+sin*0.3*armE)
+                // Y reduced from 1.0→0.7 to avoid elbow hyperextension at high twist angles.
+                if (_leftUpperArm)
+                {
+                    float rz = 1.2f + Mathf.Sin(_armSwayPhase) * 0.3f * armE;
+                    float rx = Mathf.Sin(_armSwayPhase * 0.7f) * 0.2f * armE;
+                    float ry = 0.7f;   // forward twist (Z-flip negated from JS -1.0, reduced for elbow)
+                    _leftUpperArm.localRotation = EulerXYZ(rx * Mathf.Rad2Deg, ry * Mathf.Rad2Deg, rz * Mathf.Rad2Deg);
+                }
+                if (_rightUpperArm)
+                {
+                    float rz = -1.2f - Mathf.Sin(_armSwayPhase + Mathf.PI) * 0.3f * armE;
+                    float rx = Mathf.Sin(_armSwayPhase * 0.7f + 1f) * 0.2f * armE;
+                    float ry = -0.7f;  // forward twist (Z-flip negated from JS 1.0, reduced for elbow)
+                    _rightUpperArm.localRotation = EulerXYZ(rx * Mathf.Rad2Deg, ry * Mathf.Rad2Deg, rz * Mathf.Rad2Deg);
+                }
+                if (_leftLowerArm)
+                {
+                    float rz = -0.3f - Mathf.Sin(_armSwayPhase * 1.5f) * 0.2f * im * eff;
+                    _leftLowerArm.localRotation = Quaternion.Euler(0f, 0f, rz * Mathf.Rad2Deg);
+                }
+                if (_rightLowerArm)
+                {
+                    float rz = 0.3f + Mathf.Sin(_armSwayPhase * 1.5f) * 0.2f * im * eff;
+                    _rightLowerArm.localRotation = Quaternion.Euler(0f, 0f, rz * Mathf.Rad2Deg);
+                }
             }
-
-            if (_rightUpperArm)
+            else
             {
-                float rz = -1.2f - Mathf.Sin(_armSwayPhase + Mathf.PI) * 0.3f * armE;
-                float rx = -Mathf.Sin(_armSwayPhase * 0.7f + 1f) * 0.2f * armE;
-                float ry = 1.0f;
-                _rightUpperArm.localRotation = _origRUA * Quaternion.Euler(rx * Mathf.Rad2Deg, ry * Mathf.Rad2Deg, rz * Mathf.Rad2Deg);
-            }
-
-            if (_leftLowerArm)
-            {
-                float rz = -0.3f - Mathf.Sin(_armSwayPhase * 1.5f) * 0.2f * im * eff;
-                _leftLowerArm.localRotation = _origLLA * Quaternion.Euler(0, 0, rz * Mathf.Rad2Deg);
-            }
-
-            if (_rightLowerArm)
-            {
-                float rz = 0.3f + Mathf.Sin(_armSwayPhase * 1.5f) * 0.2f * im * eff;
-                _rightLowerArm.localRotation = _origRLA * Quaternion.Euler(0, 0, rz * Mathf.Rad2Deg);
+                // Fallback: raw Animator bones (less accurate, model-dependent)
+                if (_leftUpperArm)
+                {
+                    float rz = 0.7f + Mathf.Sin(_armSwayPhase) * 0.2f * armE;
+                    float rx = -Mathf.Sin(_armSwayPhase * 0.7f) * 0.1f * armE;
+                    _leftUpperArm.localRotation = _origLUA * Quaternion.Euler(rx * Mathf.Rad2Deg, 0f, rz * Mathf.Rad2Deg);
+                }
+                if (_rightUpperArm)
+                {
+                    float rz = -0.7f - Mathf.Sin(_armSwayPhase + Mathf.PI) * 0.2f * armE;
+                    float rx = -Mathf.Sin(_armSwayPhase * 0.7f + 1f) * 0.1f * armE;
+                    _rightUpperArm.localRotation = _origRUA * Quaternion.Euler(rx * Mathf.Rad2Deg, 0f, rz * Mathf.Rad2Deg);
+                }
+                if (_leftLowerArm)
+                {
+                    float rz = -0.3f - Mathf.Sin(_armSwayPhase * 1.5f) * 0.2f * im * eff;
+                    _leftLowerArm.localRotation = _origLLA * Quaternion.Euler(0, 0, rz * Mathf.Rad2Deg);
+                }
+                if (_rightLowerArm)
+                {
+                    float rz = 0.3f + Mathf.Sin(_armSwayPhase * 1.5f) * 0.2f * im * eff;
+                    _rightLowerArm.localRotation = _origRLA * Quaternion.Euler(0, 0, rz * Mathf.Rad2Deg);
+                }
             }
 
             // ── Shoulders (bounce on beat, decay) ──
@@ -276,6 +328,19 @@ namespace Annabeth.Dance
                 _rightShoulderX = _isBeat ? 0.08f * im : _rightShoulderX * 0.85f;
                 _rightShoulder.localRotation = _origRS * Quaternion.Euler(_rightShoulderX * Mathf.Rad2Deg, 0, 0);
             }
+        }
+
+        /// <summary>
+        /// Construct a rotation matching THREE.js default XYZ intrinsic Euler order.
+        /// Unity's Quaternion.Euler uses ZXY order which gives different results
+        /// when multiple axes have large angles (e.g. arm Y + Z).
+        /// THREE.js XYZ: apply X first, then Y, then Z = matrix Rz · Ry · Rx.
+        /// </summary>
+        private static Quaternion EulerXYZ(float xDeg, float yDeg, float zDeg)
+        {
+            return Quaternion.AngleAxis(zDeg, Vector3.forward)
+                 * Quaternion.AngleAxis(yDeg, Vector3.up)
+                 * Quaternion.AngleAxis(xDeg, Vector3.right);
         }
 
         /// <summary>
@@ -397,12 +462,25 @@ namespace Annabeth.Dance
             if (_neck) _neck.localRotation = _origNeck;
             if (_spine) _spine.localRotation = _origSpine;
             if (_chest) _chest.localRotation = _origChest;
-            if (_leftUpperArm) _leftUpperArm.localRotation = _origLUA;
-            if (_rightUpperArm) _rightUpperArm.localRotation = _origRUA;
-            if (_leftLowerArm) _leftLowerArm.localRotation = _origLLA;
-            if (_rightLowerArm) _rightLowerArm.localRotation = _origRLA;
             if (_leftShoulder) _leftShoulder.localRotation = _origLS;
             if (_rightShoulder) _rightShoulder.localRotation = _origRS;
+
+            // For ControlRig arms, reset to relaxed pose (not identity/T-pose)
+            // so AvatarController's relaxed pose is preserved after dance stops.
+            if (_useControlRig)
+            {
+                if (_leftUpperArm) _leftUpperArm.localRotation = RelaxedLUA;
+                if (_rightUpperArm) _rightUpperArm.localRotation = RelaxedRUA;
+                if (_leftLowerArm) _leftLowerArm.localRotation = RelaxedLLA;
+                if (_rightLowerArm) _rightLowerArm.localRotation = RelaxedRLA;
+            }
+            else
+            {
+                if (_leftUpperArm) _leftUpperArm.localRotation = _origLUA;
+                if (_rightUpperArm) _rightUpperArm.localRotation = _origRUA;
+                if (_leftLowerArm) _leftLowerArm.localRotation = _origLLA;
+                if (_rightLowerArm) _rightLowerArm.localRotation = _origRLA;
+            }
         }
     }
 }

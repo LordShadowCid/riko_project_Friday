@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine;
@@ -15,7 +16,7 @@ namespace Annabeth.Avatar
     /// </summary>
     public class DragAnimationController : MonoBehaviour
     {
-#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+#if UNITY_STANDALONE_WIN
         [Header("Spring Physics")]
         [SerializeField] private float springFrequency = 2.6f;  // Hz
         [SerializeField] private float dampingRatio = 0.35f;     // Under-damped for bounce
@@ -103,16 +104,29 @@ namespace Annabeth.Avatar
             float rawVelY = delta.y * 0.005f;  // Vertical: forward lean when moving down
             _windowVelocity = Vector2.Lerp(_windowVelocity, new Vector2(rawVelX, rawVelY), 0.3f);
 
-            // Apply spring bone forces for hair/clothes
-            if (delta != Vector2Int.zero && _joints.Count > 0)
+            // Apply spring bone forces for hair/clothes only while moving
+            if (_joints.Count > 0)
             {
-                Vector3 force = new Vector3(-delta.x, delta.y, 0).normalized * springBoneImpact;
-                foreach (var joint in _joints)
+                if (delta != Vector2Int.zero)
                 {
-                    if (joint == null) continue;
-                    joint.m_gravityDir = force.normalized;
-                    joint.m_gravityPower = force.magnitude;
-                    _vrm.Runtime?.SpringBone?.SetJointLevel(joint.transform, joint.Blittable);
+                    Vector3 force = new Vector3(-delta.x, delta.y, 0).normalized * springBoneImpact;
+                    foreach (var joint in _joints)
+                    {
+                        if (joint == null) continue;
+                        joint.m_gravityDir = force.normalized;
+                        joint.m_gravityPower = force.magnitude;
+                        _vrm.Runtime?.SpringBone?.SetJointLevel(joint.transform, joint.Blittable);
+                    }
+                }
+                else
+                {
+                    // Reset spring bone gravity when not moving
+                    foreach (var joint in _joints)
+                    {
+                        if (joint == null) continue;
+                        joint.m_gravityPower = 0f;
+                        _vrm.Runtime?.SpringBone?.SetJointLevel(joint.transform, joint.Blittable);
+                    }
                 }
             }
 
@@ -141,24 +155,24 @@ namespace Annabeth.Avatar
             // Skip if negligible
             if (Mathf.Abs(_springPosZ) < 0.01f && Mathf.Abs(_springPosX) < 0.01f) return;
 
-            // Apply hip sway (additive on top of current rotation)
+            // Apply hip sway from original base rotation (NOT additive)
             if (_hips)
             {
                 Quaternion sway = Quaternion.Euler(_springPosX, 0f, _springPosZ);
-                _hips.localRotation = _hips.localRotation * sway;
+                _hips.localRotation = _origHips * sway;
             }
 
-            // Apply arm swing (opposite direction for natural counterbalance)
+            // Apply arm swing from original base rotation
             float armZ = _springPosZ * armSwingScale;
             if (_leftUpperArm)
             {
                 Quaternion swing = Quaternion.Euler(0f, 0f, armZ);
-                _leftUpperArm.localRotation = _leftUpperArm.localRotation * swing;
+                _leftUpperArm.localRotation = _origLUA * swing;
             }
             if (_rightUpperArm)
             {
                 Quaternion swing = Quaternion.Euler(0f, 0f, -armZ);
-                _rightUpperArm.localRotation = _rightUpperArm.localRotation * swing;
+                _rightUpperArm.localRotation = _origRUA * swing;
             }
         }
 

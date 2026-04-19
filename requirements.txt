@@ -22,6 +22,7 @@ peft
 chardet
 PyYAML
 psutil
+webrtcvad-wheels>=2.0.14
 jieba_fast
 jieba
 split-lang

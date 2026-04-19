@@ -13,7 +13,7 @@ namespace Annabeth.Core
     /// </summary>
     public class OccluderQuadManager : MonoBehaviour
     {
-#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+#if UNITY_STANDALONE_WIN
         [StructLayout(LayoutKind.Sequential)]
         struct RECT { public int Left, Top, Right, Bottom; }
 
@@ -44,7 +44,7 @@ namespace Annabeth.Core
         private float _updateTimer;
         private bool _enabled;
 
-#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+#if UNITY_STANDALONE_WIN
         private IntPtr _hwnd;
         private IntPtr _sittingOnWindow;
 

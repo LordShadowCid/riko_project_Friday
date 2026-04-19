@@ -41,6 +41,7 @@ namespace Annabeth.Avatar
 
         private void OnEnable()
         {
+            ScanForNewModels();
             RefreshList();
         }
 
@@ -151,6 +152,104 @@ namespace Annabeth.Avatar
                     isRelativeToStreaming = true
                 });
             }
+        }
+
+        /// <summary>
+        /// Auto-scan well-known directories for .vrm files and add any new ones
+        /// to the library. Scans:
+        ///   1) StreamingAssets/Models/  (built-in, shipped with build)
+        ///   2) {exe_dir}/VRM_Models/   (user drop-in folder next to the exe)
+        /// </summary>
+        private void ScanForNewModels()
+        {
+            var scanDirs = new List<(string dir, bool isStreaming)>
+            {
+                (Path.Combine(Application.streamingAssetsPath, "Models"), true),
+                (Path.Combine(Application.dataPath, "..", "VRM_Models"), false),
+            };
+
+            bool changed = false;
+
+            foreach (var (dir, isStreaming) in scanDirs)
+            {
+                string resolvedDir = Path.GetFullPath(dir);
+                if (!Directory.Exists(resolvedDir))
+                {
+                    // Create the user VRM_Models folder if it doesn't exist, so the user knows where to put files
+                    if (!isStreaming)
+                    {
+                        try { Directory.CreateDirectory(resolvedDir); }
+                        catch (Exception e) { Debug.LogWarning($"[VrmModelLibrary] Could not create {resolvedDir}: {e.Message}"); }
+                    }
+                    continue;
+                }
+
+                string[] vrmFiles;
+                try { vrmFiles = Directory.GetFiles(resolvedDir, "*.vrm", SearchOption.TopDirectoryOnly); }
+                catch (Exception e)
+                {
+                    Debug.LogWarning($"[VrmModelLibrary] Could not scan {resolvedDir}: {e.Message}");
+                    continue;
+                }
+
+                foreach (string fullPath in vrmFiles)
+                {
+                    string normalizedFull = Path.GetFullPath(fullPath);
+
+                    // Check if already in library (by full path or relative path)
+                    bool alreadyExists = false;
+                    foreach (var e in _entries)
+                    {
+                        string existingFull = e.isRelativeToStreaming
+                            ? Path.GetFullPath(Path.Combine(Application.streamingAssetsPath, e.filePath))
+                            : Path.GetFullPath(e.filePath);
+
+                        if (string.Equals(existingFull, normalizedFull, StringComparison.OrdinalIgnoreCase))
+                        {
+                            alreadyExists = true;
+                            break;
+                        }
+                    }
+
+                    if (alreadyExists) continue;
+
+                    string fileName = Path.GetFileNameWithoutExtension(fullPath);
+
+                    if (isStreaming)
+                    {
+                        // Store as relative path for built-in models
+                        string relPath = "Models/" + Path.GetFileName(fullPath);
+                        _entries.Add(new LibraryEntry
+                        {
+                            displayName = fileName,
+                            filePath = relPath,
+                            isDefault = false,
+                            isRelativeToStreaming = true,
+                            dateAdded = DateTime.Now.ToString("yyyy-MM-dd HH:mm"),
+                            author = ""
+                        });
+                    }
+                    else
+                    {
+                        // Store absolute path for user-added models
+                        _entries.Add(new LibraryEntry
+                        {
+                            displayName = fileName,
+                            filePath = normalizedFull,
+                            isDefault = false,
+                            isRelativeToStreaming = false,
+                            dateAdded = DateTime.Now.ToString("yyyy-MM-dd HH:mm"),
+                            author = ""
+                        });
+                    }
+
+                    Debug.Log($"[VrmModelLibrary] Auto-discovered: {fileName} from {resolvedDir}");
+                    changed = true;
+                }
+            }
+
+            if (changed)
+                SaveLibrary();
         }
 
         // ── List Rendering ──────────────────────────────────────

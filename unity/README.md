@@ -193,9 +193,25 @@ Message format:
 3. Platform: **Windows**
 4. Architecture: **x86_64**
 5. Click **Build**
-6. Output: `Builds/Annabeth.exe`
+6. Output: `Builds/Annabeth.exe` or another stable path you will pass to the launcher
 
-Update `start_annabeth.ps1` to launch the Unity build instead of PyQt6 companion.
+The canonical desktop launcher already supports Unity builds. By default it looks for:
+
+```powershell
+$env:USERPROFILE\unit\Builds\AnnabethTest\Annabeth.exe
+```
+
+If your build is elsewhere, start Annabeth with:
+
+```powershell
+.\start_annabeth.ps1 -UnityBuild "C:\Path\To\Annabeth.exe"
+```
+
+For manual fallback or debugging, you can still force the PyQt6 frontend with:
+
+```powershell
+.\start_annabeth.ps1 -Legacy
+```
 
 ---
 
@@ -208,14 +224,14 @@ Update `start_annabeth.ps1` to launch the Unity build instead of PyQt6 companion
 - Eye tracking (VRMLookAt)
 - Blinking (automatic)
 - Transparent window (UniWindowController)
-- Socket communication (TCP)
+- Socket communication (`ws://127.0.0.1:8765/ws` via aiohttp)
 - Hotkeys (when window focused)
 
 ### TODO / Future Work
 - VRMA animation playback
 - System audio capture in Unity (currently stays in Python)
 - Truly global hotkeys (need native plugin)
-- Subtitle display (add TextMeshPro)
+- Per-word subtitle highlighting (current read-aloud text uses the speech bubble)
 - Mode indicator UI
 
 ---

@@ -12,7 +12,7 @@ namespace Annabeth.Core
     /// </summary>
     public class DesktopAmbientProbe : MonoBehaviour
     {
-#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+#if UNITY_STANDALONE_WIN
         [StructLayout(LayoutKind.Sequential)]
         struct RECT { public int Left, Top, Right, Bottom; }
 
@@ -57,7 +57,7 @@ namespace Annabeth.Core
             intensity = Mathf.Clamp01(value);
         }
 
-#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+#if UNITY_STANDALONE_WIN
         private IntPtr _hwnd;
 
         private void Start()

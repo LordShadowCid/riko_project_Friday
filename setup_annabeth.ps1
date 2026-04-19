@@ -2,13 +2,13 @@
 # Annabeth - Complete Setup Script for Fresh Windows PC
 # ============================================================================
 # Run as Administrator:  Right-click PowerShell -> Run as Administrator
-#   cd "c:\Users\blakd\OneDrive\Desktop\Anabeth"
+#   cd "<path-to-Annabeth>"
 #   Set-ExecutionPolicy Bypass -Scope Process -Force
 #   .\setup_annabeth.ps1
 # ============================================================================
 
 $ErrorActionPreference = "Continue"
-$ProjectRoot = "c:\Users\blakd\OneDrive\Desktop\Anabeth"
+$ProjectRoot = if ($PSScriptRoot) { [System.IO.Path]::GetFullPath($PSScriptRoot) } else { (Get-Location).Path }
 $sep = '=' * 70
 $stepNum = 0
 
@@ -32,7 +32,8 @@ Step "Install Visual C++ Build Tools (winget)"
 # Needed for compiling Python packages like pyopenjtalk
 $progX86 = [Environment]::GetFolderPath('ProgramFilesX86')
 $vsWhere = Join-Path $progX86 'Microsoft Visual Studio\Installer\vswhere.exe'
-if (Test-Path $vsWhere) {
+$knownBuildToolsPath = Join-Path $progX86 'Microsoft Visual Studio\2022\BuildTools'
+if ((Test-Path $vsWhere) -or (Test-Path $knownBuildToolsPath)) {
     OK 'Visual Studio / Build Tools already installed'
 } else {
     INFO 'Installing Visual Studio Build Tools via winget...'
@@ -245,8 +246,9 @@ Write-Host '    1. Close and reopen PowerShell (to pick up PATH changes)'
 Write-Host '    2. If you use OpenAI, set your API key:'
 Write-Host '       [Environment]::SetEnvironmentVariable("OPENAI_API_KEY", "sk-...", "User")'
 Write-Host '    3. Run Annabeth:'
-Write-Host '       cd "c:\Users\blakd\OneDrive\Desktop\Anabeth"'
-Write-Host '       .\start_annabeth.ps1'
+Write-Host ('       cd "' + $ProjectRoot + '"')
+Write-Host '       .\start_annabeth.ps1              # Unity frontend by default'
+Write-Host '       .\start_annabeth.ps1 -Legacy      # force PyQt6 fallback frontend'
 Write-Host ''
 Write-Host '  Hardware reference saved to: PC_HARDWARE_REFERENCE.md' -ForegroundColor Gray
 Write-Host ''

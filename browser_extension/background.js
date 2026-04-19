@@ -63,3 +63,25 @@ function relayToTabs(message) {
 }
 
 connect();
+
+// Forward text selections from content scripts to the avatar WebSocket server.
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg && msg.type === 'selected_text') {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(msg));
+      console.log("[Annabeth] Sent selection to server:", msg.text.length, "chars");
+    } else {
+      console.warn("[Annabeth] WebSocket not connected, queuing reconnect for selection");
+      // Try to reconnect immediately and resend
+      connect();
+      setTimeout(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(msg));
+          console.log("[Annabeth] Sent selection after reconnect:", msg.text.length, "chars");
+        } else {
+          console.error("[Annabeth] Still not connected - selection lost");
+        }
+      }, 1500);
+    }
+  }
+});

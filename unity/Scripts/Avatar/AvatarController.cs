@@ -20,6 +20,10 @@ namespace Annabeth.Avatar
         private Vrm10RuntimeExpression _expression;
         private bool _isLoaded;
 
+        // Material opacity tracking — stores material, its color property name, and cached alpha
+        private readonly System.Collections.Generic.List<(Material mat, string colorProp, float origAlpha)> _materialAlphas
+            = new System.Collections.Generic.List<(Material, string, float)>();
+
         public Vrm10Instance VrmInstance => _vrmInstance;
         public Vrm10RuntimeExpression Expression => _expression;
         public bool IsLoaded => _isLoaded;
@@ -69,6 +73,7 @@ namespace Annabeth.Avatar
                 _vrmInstance = await Vrm10.LoadPathAsync(fullPath,
                     canLoadVrm0X: true,
                     showMeshes: true,
+                    materialGenerator: new UrpVrm10MaterialDescriptorGenerator(),
                     ct: destroyCancellationToken);
 
                 sw.Stop();
@@ -85,19 +90,21 @@ namespace Annabeth.Avatar
                 _vrmInstance.transform.localRotation = Quaternion.identity;
 
                 // VRM 1.0 models face +Z natively. Place camera on +Z side
-                // looking back toward origin with Y-rotation only.
-                // NO Z-roll — there is no URP Y-flip to compensate for.
+                // looking back toward origin. Framed for full body visibility.
                 var cam = Camera.main;
                 if (cam != null)
                 {
-                    cam.transform.position = new Vector3(0f, 1.3f, 3.0f);
+                    cam.transform.position = new Vector3(0f, 0.85f, 2.6f);
                     cam.transform.rotation = Quaternion.Euler(0f, 180f, 0f);
+                    cam.fieldOfView = 35f;
+                    cam.nearClipPlane = 0.1f;
                 }
 
                 _expression = _vrmInstance.Runtime.Expression;
 
                 InitializeControllers();
                 ApplyRelaxedPose();
+                CacheMaterialAlphas();
 
                 _isLoaded = true;
                 Debug.Log("[AvatarController] VRM loaded successfully!");
@@ -152,10 +159,205 @@ namespace Annabeth.Avatar
             var lLA = rig.GetBoneTransform(HumanBodyBones.LeftLowerArm);
             var rLA = rig.GetBoneTransform(HumanBodyBones.RightLowerArm);
 
-            if (lUA != null) lUA.localRotation = Quaternion.Euler(0f, 0f, 55f);
-            if (rUA != null) rUA.localRotation = Quaternion.Euler(0f, 0f, -55f);
-            if (lLA != null) lLA.localRotation = Quaternion.Euler(0f, -20f, 0f);
-            if (rLA != null) rLA.localRotation = Quaternion.Euler(0f, 20f, 0f);
+            if (lUA != null) lUA.localRotation = Quaternion.Euler(0f, 0f, 72f);
+            if (rUA != null) rUA.localRotation = Quaternion.Euler(0f, 0f, -72f);
+            if (lLA != null) lLA.localRotation = Quaternion.Euler(0f, -35f, 0f);
+            if (rLA != null) rLA.localRotation = Quaternion.Euler(0f, 35f, 0f);
+        }
+
+        /// <summary>
+        /// Cache original material alpha values after VRM load.
+        /// Checks both _Color (standard) and _BaseColor (URP) properties.
+        /// Forces all materials to fully opaque rendering.
+        /// </summary>
+        private void CacheMaterialAlphas()
+        {
+            _materialAlphas.Clear();
+            if (_vrmInstance == null) return;
+
+            foreach (var r in _vrmInstance.GetComponentsInChildren<Renderer>())
+            {
+                foreach (var mat in r.materials)
+                {
+                    if (mat == null) continue;
+
+                    // Determine which color property this material uses
+                    string colorProp = null;
+                    if (mat.HasProperty("_Color")) colorProp = "_Color";
+                    else if (mat.HasProperty("_BaseColor")) colorProp = "_BaseColor";
+
+                    float origAlpha = 1f;
+                    if (colorProp != null)
+                    {
+                        origAlpha = mat.GetColor(colorProp).a;
+                        // Force alpha to 1.0 so character is fully opaque
+                        var c = mat.GetColor(colorProp);
+                        c.a = 1f;
+                        mat.SetColor(colorProp, c);
+                        origAlpha = 1f;
+                    }
+
+                    // Force shade color alpha too (MToon shaders)
+                    if (mat.HasProperty("_ShadeColor"))
+                    {
+                        var sc = mat.GetColor("_ShadeColor");
+                        sc.a = 1f;
+                        mat.SetColor("_ShadeColor", sc);
+                    }
+
+                    // Force opaque rendering mode
+                    ForceOpaqueRendering(mat);
+
+                    _materialAlphas.Add((mat, colorProp ?? "_Color", origAlpha));
+                }
+            }
+            Debug.Log($"[AvatarController] Cached {_materialAlphas.Count} materials, forced opaque rendering.");
+        }
+
+        /// <summary>
+        /// Force a material to render as opaque by setting surface type,
+        /// render queue, ZWrite, blend modes, and disabling transparency keywords.
+        /// Aggressively overrides all known transparency properties for MToon10/URP.
+        /// </summary>
+        private void ForceOpaqueRendering(Material mat)
+        {
+            // MToon10 alpha mode: 0=Opaque
+            if (mat.HasProperty("_M_AlphaMode"))
+                mat.SetFloat("_M_AlphaMode", 0f);
+
+            // MToon10 transparent-with-ZWrite flag
+            if (mat.HasProperty("_M_TransparentWithZWrite"))
+                mat.SetFloat("_M_TransparentWithZWrite", 0f);
+
+            // URP Lit surface type: 0=Opaque
+            if (mat.HasProperty("_Surface"))
+                mat.SetFloat("_Surface", 0f);
+
+            // Force ZWrite on (required for opaque)
+            if (mat.HasProperty("_ZWrite"))
+                mat.SetFloat("_ZWrite", 1f);
+
+            // Force GPU blend mode to fully opaque (One, Zero)
+            // This overrides any shader-level alpha blending
+            if (mat.HasProperty("_SrcBlend"))
+                mat.SetFloat("_SrcBlend", 1f); // BlendMode.One
+            if (mat.HasProperty("_DstBlend"))
+                mat.SetFloat("_DstBlend", 0f); // BlendMode.Zero
+            if (mat.HasProperty("_SrcBlendAlpha"))
+                mat.SetFloat("_SrcBlendAlpha", 1f);
+            if (mat.HasProperty("_DstBlendAlpha"))
+                mat.SetFloat("_DstBlendAlpha", 0f);
+
+            // Disable alpha cutout
+            if (mat.HasProperty("_AlphaClip"))
+                mat.SetFloat("_AlphaClip", 0f);
+            if (mat.HasProperty("_M_CutoutThresholdValue"))
+                mat.SetFloat("_M_CutoutThresholdValue", 0f);
+
+            // Disable all transparency blend keywords
+            mat.DisableKeyword("_ALPHABLEND_ON");
+            mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+            mat.DisableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            mat.DisableKeyword("_ALPHATEST_ON");
+            mat.DisableKeyword("_ALPHAMODULATE_ON");
+
+            // Enable dark outline so character stands out against any wallpaper.
+            // MToon10 outline: ScreenCoordinates mode with dark color.
+            if (mat.HasProperty("_M_OutlineWidthMode"))
+                mat.SetFloat("_M_OutlineWidthMode", 2f); // ScreenCoordinates
+            if (mat.HasProperty("_M_OutlineWidth"))
+                mat.SetFloat("_M_OutlineWidth", 0.08f); // thin but visible
+            if (mat.HasProperty("_M_OutlineColor"))
+                mat.SetColor("_M_OutlineColor", new Color(0.05f, 0.05f, 0.08f, 1f)); // near-black
+            if (mat.HasProperty("_M_OutlineLightingMixFactor"))
+                mat.SetFloat("_M_OutlineLightingMixFactor", 0f); // pure unlit outline color
+            mat.EnableKeyword("_MTOON_OUTLINE_ON");
+
+            // Set render queue to Geometry (opaque = 2000)
+            mat.renderQueue = 2000;
+        }
+
+        /// <summary>
+        /// Per-frame enforcement: re-force opaque on all VRM materials.
+        /// UniVRM's runtime may reset material properties each frame during
+        /// expression evaluation. This ensures they stay opaque.
+        /// </summary>
+        private void LateUpdate()
+        {
+            if (!_isLoaded || _materialAlphas.Count == 0) return;
+
+            foreach (var (mat, colorProp, _) in _materialAlphas)
+            {
+                if (mat == null) continue;
+
+                // Re-force color alpha to 1
+                if (mat.HasProperty(colorProp))
+                {
+                    var c = mat.GetColor(colorProp);
+                    if (c.a < 0.99f)
+                    {
+                        c.a = 1f;
+                        mat.SetColor(colorProp, c);
+                    }
+                }
+
+                // Re-force shade color alpha (MToon)
+                if (mat.HasProperty("_ShadeColor"))
+                {
+                    var sc = mat.GetColor("_ShadeColor");
+                    if (sc.a < 0.99f)
+                    {
+                        sc.a = 1f;
+                        mat.SetColor("_ShadeColor", sc);
+                    }
+                }
+
+                // Re-force opaque blend modes every frame (UniVRM may reset these)
+                if (mat.HasProperty("_SrcBlend"))
+                {
+                    float src = mat.GetFloat("_SrcBlend");
+                    if (src != 1f)
+                    {
+                        mat.SetFloat("_SrcBlend", 1f);
+                        mat.SetFloat("_DstBlend", 0f);
+                    }
+                }
+                if (mat.HasProperty("_SrcBlendAlpha"))
+                {
+                    float srcA = mat.GetFloat("_SrcBlendAlpha");
+                    if (srcA != 1f)
+                    {
+                        mat.SetFloat("_SrcBlendAlpha", 1f);
+                        mat.SetFloat("_DstBlendAlpha", 0f);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Apply character opacity by multiplying all material alpha values.
+        /// 1.0 = fully opaque (default), 0.1 = very transparent.
+        /// </summary>
+        public void ApplyCharacterOpacity(float opacity)
+        {
+            opacity = Mathf.Clamp(opacity, 0.1f, 1f);
+            foreach (var (mat, colorProp, origAlpha) in _materialAlphas)
+            {
+                if (mat == null || !mat.HasProperty(colorProp)) continue;
+                var c = mat.GetColor(colorProp);
+                c.a = origAlpha * opacity;
+                mat.SetColor(colorProp, c);
+            }
+        }
+
+        /// <summary>
+        /// Apply avatar scale from settings.
+        /// </summary>
+        public void ApplyAvatarSize(float size)
+        {
+            if (_vrmInstance == null) return;
+            size = Mathf.Clamp(size, 0.5f, 2f);
+            _vrmInstance.transform.localScale = Vector3.one * size;
         }
 
         private void OnDestroy()

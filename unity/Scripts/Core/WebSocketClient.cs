@@ -27,6 +27,7 @@ namespace Annabeth.Core
 
         private ClientWebSocket _ws;
         private CancellationTokenSource _cts;
+        private Task _connectTask;
         private readonly ConcurrentQueue<string> _incomingMessages = new();
         private bool _connected;
         private bool _shouldReconnect = true;
@@ -84,7 +85,8 @@ namespace Annabeth.Core
         public void Connect()
         {
             _shouldReconnect = true;
-            _ = ConnectLoop();
+            if (_connectTask == null || _connectTask.IsCompleted)
+                _connectTask = ConnectLoop();
         }
 
         public void Disconnect()
@@ -93,6 +95,12 @@ namespace Annabeth.Core
             _cts?.Cancel();
             _cts?.Dispose();
             _cts = null;
+
+            if (_ws != null)
+            {
+                _ = CloseAndDisposeSocketAsync(_ws);
+                _ws = null;
+            }
         }
 
         /// <summary>
@@ -137,18 +145,20 @@ namespace Annabeth.Core
                     _cts?.Cancel();
                     _cts?.Dispose();
                     _cts = new CancellationTokenSource();
+                    var connectionToken = _cts.Token;
 
-                    _ws?.Dispose();
+                    if (_ws != null)
+                        await CloseAndDisposeSocketAsync(_ws);
                     _ws = new ClientWebSocket();
 
                     Debug.Log($"[WebSocketClient] Connecting to {WsUrl}...");
-                    await _ws.ConnectAsync(new Uri(WsUrl), _cts.Token);
+                    await _ws.ConnectAsync(new Uri(WsUrl), connectionToken);
 
                     _connected = true;
                     OnConnectionChanged?.Invoke(true);
                     Debug.Log("[WebSocketClient] Connected!");
 
-                    await ReceiveLoop(_cts.Token);
+                    await ReceiveLoop(connectionToken);
                 }
                 catch (OperationCanceledException)
                 {
@@ -169,7 +179,36 @@ namespace Annabeth.Core
                 if (!_shouldReconnect) break;
 
                 Debug.Log($"[WebSocketClient] Reconnecting in {reconnectDelay}s...");
-                await Task.Delay(TimeSpan.FromSeconds(reconnectDelay));
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(reconnectDelay), _cts?.Token ?? CancellationToken.None);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
+        }
+
+        private static async Task CloseAndDisposeSocketAsync(ClientWebSocket socket)
+        {
+            try
+            {
+                if (socket.State == WebSocketState.Open || socket.State == WebSocketState.CloseReceived)
+                {
+                    await socket.CloseAsync(
+                        WebSocketCloseStatus.NormalClosure,
+                        "Client disconnect",
+                        CancellationToken.None);
+                }
+            }
+            catch
+            {
+                // Best-effort shutdown during play mode exit or reconnect.
+            }
+            finally
+            {
+                socket.Dispose();
             }
         }
 

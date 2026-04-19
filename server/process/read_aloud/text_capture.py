@@ -12,6 +12,22 @@ from typing import Optional, List
 
 import pyperclip
 
+_last_capture_debug = {
+    "foreground_hwnd": 0,
+    "foreground_title": "",
+    "target_was_companion": False,
+    "should_copy": True,
+    "clipboard_had_text_before": False,
+    "captured_text_length": 0,
+}
+
+# Abbreviations that contain a period but are NOT sentence boundaries.
+# Defined at module level so the list is built once, not on every call.
+_SENTENCE_ABBREVIATIONS: List[str] = [
+    'Mr.', 'Mrs.', 'Ms.', 'Dr.', 'Prof.', 'Sr.', 'Jr.',
+    'vs.', 'etc.', 'i.e.', 'e.g.', 'Inc.', 'Ltd.', 'Co.',
+]
+
 # ---------- Win32 helpers (Windows only) ----------
 _IS_WIN = sys.platform == "win32"
 if _IS_WIN:
@@ -66,8 +82,27 @@ if _IS_WIN:
     def _get_foreground_hwnd() -> int:
         return _user32.GetForegroundWindow()
 
+    def _get_window_title(hwnd: int) -> str:
+        if not hwnd:
+            return ""
+        length = _user32.GetWindowTextLengthW(hwnd)
+        if length <= 0:
+            return ""
+        buffer = ctypes.create_unicode_buffer(length + 1)
+        _user32.GetWindowTextW(hwnd, buffer, length + 1)
+        return buffer.value
+
     def _set_foreground(hwnd: int) -> None:
         _user32.SetForegroundWindow(hwnd)
+
+    def _is_companion_window(hwnd: int) -> bool:
+        if not hwnd:
+            return False
+        if _companion_hwnd and hwnd == _companion_hwnd:
+            return True
+
+        title = _get_window_title(hwnd).strip().lower()
+        return "annabeth" in title
 
     # Annabeth overlay hwnd – set once at startup so we can skip it
     _companion_hwnd: int = 0
@@ -94,6 +129,11 @@ else:
 
     def register_companion_hwnd(hwnd: int) -> None:
         pass
+
+
+def get_last_capture_debug() -> dict:
+    """Return the most recent capture diagnostics for troubleshooting."""
+    return dict(_last_capture_debug)
 
 
 def capture_selected_text(restore_clipboard: bool = True) -> Optional[str]:
@@ -124,7 +164,17 @@ def capture_selected_text(restore_clipboard: bool = True) -> Optional[str]:
     # (the overlay has no selectable text) and just read whatever is on
     # the clipboard already – the user likely copied it themselves.
     fg = _get_foreground_hwnd()
-    should_copy = fg != _companion_hwnd or _companion_hwnd == 0
+    should_copy = not _is_companion_window(fg)
+    fg_title = _get_window_title(fg) if _IS_WIN else ""
+
+    _last_capture_debug.update({
+        "foreground_hwnd": fg,
+        "foreground_title": fg_title,
+        "target_was_companion": not should_copy,
+        "should_copy": should_copy,
+        "clipboard_had_text_before": bool(original_clipboard and original_clipboard.strip()),
+        "captured_text_length": 0,
+    })
 
     if should_copy:
         # Clear clipboard to detect if copy worked
@@ -158,13 +208,29 @@ def capture_selected_text(restore_clipboard: bool = True) -> Optional[str]:
 
     # Return None if clipboard was empty (nothing selected)
     if not text or not text.strip():
+        _last_capture_debug["captured_text_length"] = 0
         # Last-ditch: if we didn't copy (overlay was focused), try the
         # original clipboard content — maybe the user already copied it.
         if not should_copy and original_clipboard and original_clipboard.strip():
+            _last_capture_debug["captured_text_length"] = len(original_clipboard.strip())
             return original_clipboard.strip()
+
+        # Fallback: check browser extension selection (sent via WebSocket)
+        try:
+            from shared import get_companion_state
+            browser_text = get_companion_state().take_browser_selected_text()
+            if browser_text and len(browser_text) > 5:
+                _last_capture_debug["captured_text_length"] = len(browser_text)
+                print(f"[ReadAloud] Using browser extension selection ({len(browser_text)} chars)")
+                return browser_text
+        except Exception:
+            pass
+
         return None
 
-    return text.strip()
+    stripped = text.strip()
+    _last_capture_debug["captured_text_length"] = len(stripped)
+    return stripped
 
 
 def split_into_sentences(text: str) -> List[str]:
@@ -190,7 +256,7 @@ def split_into_sentences(text: str) -> List[str]:
     
     # First, protect common abbreviations by replacing their periods
     protected = text
-    abbreviations = ['Mr.', 'Mrs.', 'Ms.', 'Dr.', 'Prof.', 'Sr.', 'Jr.', 'vs.', 'etc.', 'i.e.', 'e.g.', 'Inc.', 'Ltd.', 'Co.']
+    abbreviations = _SENTENCE_ABBREVIATIONS
     placeholders = {}
     for i, abbr in enumerate(abbreviations):
         placeholder = f"__ABBR{i}__"

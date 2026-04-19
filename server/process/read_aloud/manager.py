@@ -133,15 +133,6 @@ class ReadAloudState:
                 return False
             return True
     
-    def advance(self) -> Optional[str]:
-        """Move to next sentence and return it, or None if done."""
-        with self._lock:
-            self._current_index += 1
-            if self._current_index >= len(self._sentences):
-                self._status = ReadAloudStatus.IDLE
-                return None
-            return self._sentences[self._current_index]
-    
     def pause(self) -> None:
         """Request pause (will finish current sentence first)."""
         with self._lock:
@@ -309,28 +300,3 @@ def get_read_aloud_manager() -> ReadAloudManager:
     if _manager is None:
         _manager = ReadAloudManager()
     return _manager
-
-
-if __name__ == "__main__":
-    # Test the manager
-    manager = get_read_aloud_manager()
-    
-    # Simulate reading
-    test_text = "Hello there! This is a test. How are you doing today? I hope you're well."
-    manager.state.start_reading(test_text)
-    
-    print(f"Status: {manager.state.status}")
-    print(f"Sentences: {manager.state.sentences}")
-    
-    # Simulate reading through sentences
-    while manager.state.is_reading:
-        sentence = manager.get_next_sentence()
-        if sentence:
-            print(f"Reading: {sentence}")
-            # Simulate TTS delay
-            time.sleep(0.5)
-            # Note: get_next_sentence handles index advancement internally
-        else:
-            break
-    
-    print(f"Final status: {manager.state.status}")

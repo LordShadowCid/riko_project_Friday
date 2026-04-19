@@ -18,7 +18,7 @@ namespace Annabeth.Core
     /// </summary>
     public class WindowSnapper : MonoBehaviour
     {
-#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+#if UNITY_STANDALONE_WIN
         [StructLayout(LayoutKind.Sequential)]
         struct RECT { public int Left, Top, Right, Bottom; }
 
@@ -67,7 +67,7 @@ namespace Annabeth.Core
 
         /// <summary>True when avatar is sitting (on taskbar or window top).</summary>
         public bool IsSitting { get; private set; }
-#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+#if UNITY_STANDALONE_WIN
         public System.IntPtr SittingOnWindowHandle => _sittingOnWindow;
 #else
         public System.IntPtr SittingOnWindowHandle => System.IntPtr.Zero;
@@ -81,7 +81,7 @@ namespace Annabeth.Core
 
         private int _snapIndex;
 
-#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+#if UNITY_STANDALONE_WIN
         private IntPtr _hwnd;
         private int _screenW, _screenH;
         private int _taskbarH;

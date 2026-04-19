@@ -16,6 +16,7 @@ namespace Annabeth.Core
         public const string READ_PAUSE = "read_pause";
         public const string READ_RESUME = "read_resume";
         public const string RANDOM_PROMPT = "random_prompt";
+        public const string SHUTDOWN = "shutdown";
 
         // Server → Client
         public const string SPEAK_START = "speak_start";
@@ -25,6 +26,8 @@ namespace Annabeth.Core
         public const string READ_HIGHLIGHT = "read_highlight";
         public const string READ_CLEAR = "read_clear";
         public const string DEBUG_STATUS = "debug_status";
+        public const string FACE_EXPRESSION = "face_expression";
+        public const string IDLE_THOUGHT = "idle_thought";
     }
 
     /// <summary>
@@ -63,6 +66,8 @@ namespace Annabeth.Core
         public event System.Action<bool> OnSilenceToggle;
         public event System.Action<float, float, float, bool> OnAudioAnalysis;
         public event System.Action<DanceStyle> OnDanceStyleChange;
+        public event System.Action<string> OnReadHighlight;
+        public event System.Action OnReadClear;
         public event System.Action<string> OnPlayAnimation;
         public event System.Action OnReadStart;
         public event System.Action OnReadPause;
@@ -72,6 +77,10 @@ namespace Annabeth.Core
         /// Fired when debug_status message arrives: (status, userText, responseText)
         /// </summary>
         public event System.Action<string, string, string> OnDebugStatus;
+        /// <summary>Fired on face_expression: (name, intensity)</summary>
+        public event System.Action<string, float> OnFaceExpression;
+        /// <summary>Fired on idle_thought: (text)</summary>
+        public event System.Action<string> OnIdleThought;
 
         private void Start()
         {
@@ -152,11 +161,36 @@ namespace Annabeth.Core
                     OnAudioAnalysis?.Invoke(bass, mid, high, isBeat);
                     break;
 
+                case MessageTypes.READ_HIGHLIGHT:
+                    string sentence = data.TryGetValue("sentence", out object sentenceObj) ? sentenceObj?.ToString() ?? "" : "";
+                    if (!string.IsNullOrWhiteSpace(sentence))
+                    {
+                        OnReadStart?.Invoke();
+                        OnReadHighlight?.Invoke(sentence);
+                    }
+                    break;
+
+                case MessageTypes.READ_CLEAR:
+                    OnReadClear?.Invoke();
+                    OnReadEnd?.Invoke();
+                    break;
+
                 case MessageTypes.DEBUG_STATUS:
                     string dbgStatus = data.TryGetValue("status", out object sObj) ? sObj?.ToString() ?? "" : "";
                     string dbgUser = data.TryGetValue("user_text", out object uObj) ? uObj?.ToString() ?? "" : "";
                     string dbgResp = data.TryGetValue("response_text", out object rObj) ? rObj?.ToString() ?? "" : "";
                     OnDebugStatus?.Invoke(dbgStatus, dbgUser, dbgResp);
+                    break;
+
+                case MessageTypes.FACE_EXPRESSION:
+                    string exprName = data.TryGetValue("name", out object enObj) ? enObj?.ToString() : null;
+                    float exprIntensity = GetFloat(data, "intensity", 0f);
+                    OnFaceExpression?.Invoke(exprName ?? string.Empty, exprIntensity);
+                    break;
+
+                case MessageTypes.IDLE_THOUGHT:
+                    string idleText = data.TryGetValue("text", out object itObj) ? itObj?.ToString() ?? "" : "";
+                    OnIdleThought?.Invoke(idleText);
                     break;
 
                 default:

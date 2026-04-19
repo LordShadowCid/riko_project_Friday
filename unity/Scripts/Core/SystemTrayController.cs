@@ -12,7 +12,10 @@ namespace Annabeth.Core
     /// </summary>
     public class SystemTrayController : MonoBehaviour
     {
-#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+        /// <summary>Set to true to bypass the minimize-to-tray interception of Application.Quit().</summary>
+        public static bool forceQuit;
+
+#if UNITY_STANDALONE_WIN
         // ── P/Invoke ────────────────────────────────────────────
         [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
         static extern bool Shell_NotifyIcon(uint msg, ref NOTIFYICONDATA data);
@@ -108,13 +111,27 @@ namespace Annabeth.Core
 
         void OnApplicationQuit()
         {
+            ShutdownTrayThread();
+        }
+
+        void OnDestroy()
+        {
+            ShutdownTrayThread();
+        }
+
+        void ShutdownTrayThread()
+        {
             Application.wantsToQuit -= OnWantsToQuit;
             if (_msgWnd != IntPtr.Zero)
                 PostMessageW(_msgWnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+            if (_thread != null && _thread.IsAlive)
+                _thread.Join(2000);
+            _thread = null;
         }
 
         bool OnWantsToQuit()
         {
+            if (forceQuit) return true;
             if (SettingsManager.Instance != null && SettingsManager.Instance.data.minimizeToTray)
             {
                 ToggleVisibility();

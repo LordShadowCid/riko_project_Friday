@@ -24,6 +24,22 @@ This repo includes a `reference/` folder containing snapshots from before the up
 
 All prompts and parameters are stored in `character_config.yaml`.
 
+## Workstation Layout
+
+For the best Windows performance, keep the repo, model folders, and generated assets on a local non-OneDrive drive such as `D:`. Running large model files from OneDrive-backed paths increases startup latency and makes Python environments more fragile.
+
+Recommended split on this workstation class:
+
+- Ollama / LLM on GPU 0
+- Faster-Whisper + GPT-SoVITS on GPU 1
+- Models, caches, Unity builds, and third-party weights on `D:`
+
+The startup launcher now auto-detects the repo root from its own location, so the project can be moved without editing hardcoded paths.
+
+If you want to stage the repo onto a faster drive, use `move_annabeth_to_d_drive.ps1`. It mirrors the current workspace to `D:\Annabeth` by default and leaves the source folder untouched.
+
+For a Windows optimization pass after moving, run `optimize_annabeth_workstation.ps1` as Administrator. It pins the user `OLLAMA_MODELS` path to `D:\AI\Models\Ollama` and adds Windows Defender exclusions for the Annabeth workspace, Ollama model storage, and Unity build output.
+
 ```yaml
 OPENAI_API_KEY: sk-YOURAPIKEY
 history_file: chat_history.json
@@ -123,11 +139,20 @@ python -c "import sounddevice as sd; print(sd.query_devices())"
 # Confirm Faster-Whisper is installed
 python -c "import faster_whisper; print('faster_whisper import: OK')"
 
-# Confirm your OpenAI API key is present (required for LLM calls)
+# Confirm your OpenAI API key is present if you plan to use OpenAI instead of local Ollama
 python -c "import os; print('OPENAI_API_KEY set:', bool(os.getenv('OPENAI_API_KEY')))"
 
-# Confirm GPT-SoVITS server is reachable (required for TTS)
-python -c "import requests; print('TTS server HTTP:', requests.get('http://127.0.0.1:9880').status_code)"
+# Confirm GPT-SoVITS server docs are reachable (optional if you want the launcher to start TTS for you)
+python -c "import requests; print('TTS server HTTP:', requests.get('http://127.0.0.1:9880/docs', timeout=2).status_code)"
+
+# Start the full stack from the repo folder (Unity frontend by default)
+.\start_annabeth.ps1
+
+# Or start the Legacy PyQt6 frontend explicitly
+.\start_annabeth.ps1 -Legacy
+
+# Or start it after moving the repo to another drive
+.\start_annabeth.ps1 -ProjectRoot D:\Annabeth -OllamaGpu 0 -TtsGpu 1
 ```
 
 Then set your config to use CUDA:
@@ -143,10 +168,59 @@ whisper:
 * CUDA & cuDNN installed correctly (for Faster-Whisper GPU support)
 * `ffmpeg` installed (for audio processing)
 
+For the focused runtime regression slice after startup, Unity, avatar, or read-aloud changes, run:
+
+```powershell
+.\run_runtime_checks.ps1
+```
+
+To validate backend startup without entering the microphone loop, run:
+
+```powershell
+.\check_backend_startup.ps1
+```
+
 
 ## 🧪 Usage
 
-### 1. Launch the GPT-SoVITS API 
+### 1. Preferred launch path
+
+The canonical Windows startup path is:
+
+```powershell
+.\start_annabeth.ps1
+```
+
+What it does:
+
+1. Reuses or starts Ollama on `127.0.0.1:11434`
+2. Starts GPT-SoVITS on `127.0.0.1:9880`
+3. Starts the Python backend with `python -m server.main_chat`
+4. Launches the Unity companion if the configured build exists
+5. Falls back to the Legacy PyQt6 frontend if the Unity build is missing, or if you pass `-Legacy`
+
+Use these variants when needed:
+
+```powershell
+# Force the Legacy frontend
+.\start_annabeth.ps1 -Legacy
+
+# Reuse an already-running Ollama server without restarting it
+.\start_annabeth.ps1 -ReuseRunningOllama
+
+# Override the Unity build path
+.\start_annabeth.ps1 -UnityBuild "C:\Path\To\Annabeth.exe"
+```
+
+If you end up with a stale backend, TTS server, or frontend after a crash, use:
+
+```powershell
+.\stop_annabeth.ps1
+```
+
+Add `-IncludeOllama` only if you also want to stop the local Ollama server.
+
+### 2. Optional manual service launch
 
 This repo calls a GPT-SoVITS WebAPI at `http://127.0.0.1:9880/tts`.
 
@@ -170,22 +244,35 @@ python -c "import requests; print('TTS server HTTP:', requests.get('http://127.0
 Notes:
 - The container must be able to read the reference audio. This repo mounts `./character_files` into the container at `/data/ref`, and `character_config.yaml` uses `/data/ref/main_sample.wav`.
 - GPT-SoVITS may require downloading its pretrained models inside `third_party/GPT-SoVITS/` (see the GPT-SoVITS docs if `/tts` returns a model/config error).
+- If this workspace already has models staged under `gpt_sovits_models/`, the native launchers will automatically junction that shared store into `third_party/GPT-SoVITS/` at startup.
 
-### 2. Run the main script:
+### 3. Manual backend entrypoint
 
 
 ```bash
-python server/main_chat.py
+python -m server.main_chat
 ```
+
+Use the direct Python entrypoint only when you are intentionally launching services by hand for debugging. For normal desktop use, prefer `start_annabeth.ps1` so the backend and frontend stay on the same startup contract.
 
 The flow:
 
-1. Riko listens to your voice via microphone (push to talk)
+1. Annabeth listens to your voice via microphone (push to talk)
 2. Transcribes it with Faster-Whisper
-3. Passes it to GPT (with history)
+3. Passes it to Ollama or OpenAI (with history)
 4. Generates a response
-5. Synthesizes Riko's voice using GPT-SoVITS
+5. Synthesizes Annabeth's voice using GPT-SoVITS
 6. Plays the output back to you
+
+### Read-Aloud Notes
+
+For "read this" / selected-text read-aloud:
+
+- Keep the app with the selected text focused when you give the voice command, so Annabeth copies from the selected app instead of the companion window.
+- In the Legacy PyQt6 frontend, you can also use `Ctrl+Shift+R` to trigger read-aloud for the current selection.
+- If Annabeth says she does not see any selected text, reselect the text and try again without bringing the companion window to the foreground first.
+
+For a repeatable end-to-end manual verification flow, use [docs/RUNTIME_SMOKE_CHECKLIST.md](d:\Annabeth\docs\RUNTIME_SMOKE_CHECKLIST.md).
 
 
 ## 📌 TODO / Future Improvements

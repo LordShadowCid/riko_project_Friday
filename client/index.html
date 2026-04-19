@@ -189,6 +189,7 @@
         let currentAction = null;
         const loadedAnimations = new Map();
         let isPlayingVRMA = false;
+        const avatarServerOrigin = 'http://127.0.0.1:8765';
         
         // Load VRM with animation support
         const loader = new GLTFLoader();
@@ -197,7 +198,7 @@
             loader.register((parser) => new VRMAnimationLoaderPlugin(parser));
         }
 
-        const vrmUrl = 'http://localhost:8765/models/vrm/claire_avatar.vrm';
+        const vrmUrl = `${avatarServerOrigin}/models/vrm/claire_avatar.vrm`;
         
         console.log('Loading VRM from:', vrmUrl);
         statusEl.textContent = '📦 Loading VRM model...';
@@ -300,7 +301,7 @@
             
             for (const anim of animationFiles) {
                 try {
-                    const url = `http://localhost:8765/animations/${anim.file}`;
+                    const url = `${avatarServerOrigin}/animations/${anim.file}`;
                     const response = await fetch(url, { method: 'HEAD' });
                     
                     if (response.ok) {
@@ -411,7 +412,7 @@
 
         // WebSocket connection
         function connectWebSocket() {
-            const ws = new WebSocket('ws://localhost:8765/ws');
+            const ws = new WebSocket('ws://127.0.0.1:8765/ws');
             
             ws.onopen = () => {
                 console.log('WebSocket connected');
@@ -496,10 +497,11 @@
                 'sad': '😢 Sad',
                 'angry': '😠 Angry',
                 'surprised': '😲 Surprised',
+                'thinking': '🤔 Thinking',
                 'relaxed': '😌 Relaxed',
                 'neutral': '😐 Neutral'
             };
-            emotionEl.textContent = emotionIcons[emotion] || '😊 Neutral';
+            emotionEl.textContent = emotionIcons[emotion] || '😐 Neutral';
         }
 
         // Animation loop

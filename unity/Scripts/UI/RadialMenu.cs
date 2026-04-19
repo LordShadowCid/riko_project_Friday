@@ -33,6 +33,9 @@ namespace Annabeth.UI
         private Button _btnSleep;
         private Button _btnClearHistory;
         private Button _btnQuit;
+        private Button _btnModeActive;
+        private Button _btnModeBeatDance;
+        private Button _btnModeFullDance;
 
         private void Awake()
         {
@@ -41,6 +44,9 @@ namespace Annabeth.UI
 
         private void OnDestroy()
         {
+            _btnModeActive?.onClick.RemoveListener(OnModeActiveClick);
+            _btnModeBeatDance?.onClick.RemoveListener(OnModeBeatDanceClick);
+            _btnModeFullDance?.onClick.RemoveListener(OnModeFullDanceClick);
             _btnSettings?.onClick.RemoveListener(OnSettingsClick);
             _btnCharacter?.onClick.RemoveListener(OnCharacterClick);
             _btnBubble?.onClick.RemoveListener(OnBubbleClick);
@@ -63,12 +69,17 @@ namespace Annabeth.UI
 
             // ── Menu Panel ──────────────────────────────────────
             _menuRect = UIFactory.CreatePanel(_canvas.transform, "RadialMenu",
-                new Vector2(180, 240));
+                new Vector2(180, 380));
             _menuPanel = _menuRect.gameObject;
 
             UIFactory.AddVerticalLayout(_menuRect, 6, 6, 6, 6, 4);
 
             var rowSize = new Vector2(168, 32);
+
+            // Mode buttons
+            _btnModeActive    = UIFactory.CreateButton(_menuRect, "BtnModeActive",    "Active Mode",     rowSize);
+            _btnModeBeatDance = UIFactory.CreateButton(_menuRect, "BtnModeBeatDance", "Beat Dance",      rowSize);
+            _btnModeFullDance = UIFactory.CreateButton(_menuRect, "BtnModeFullDance", "Full Dance",      rowSize);
 
             _btnSettings     = UIFactory.CreateButton(_menuRect, "BtnSettings",     "Settings",        rowSize);
             _btnCharacter    = UIFactory.CreateButton(_menuRect, "BtnCharacter",    "Change Character", rowSize);
@@ -77,6 +88,9 @@ namespace Annabeth.UI
             _btnClearHistory = UIFactory.CreateButton(_menuRect, "BtnClearHistory", "Clear History",    rowSize);
             _btnQuit         = UIFactory.CreateButton(_menuRect, "BtnQuit",         "Quit",             rowSize);
 
+            _btnModeActive.onClick.AddListener(OnModeActiveClick);
+            _btnModeBeatDance.onClick.AddListener(OnModeBeatDanceClick);
+            _btnModeFullDance.onClick.AddListener(OnModeFullDanceClick);
             _btnSettings.onClick.AddListener(OnSettingsClick);
             _btnCharacter.onClick.AddListener(OnCharacterClick);
             _btnBubble.onClick.AddListener(OnBubbleClick);
@@ -213,6 +227,30 @@ namespace Annabeth.UI
 
         // ── Button Handlers ─────────────────────────────────────
 
+        private void OnModeActiveClick()
+        {
+            var cm = FindFirstObjectByType<CompanionManager>();
+            cm?.SetMode(Core.CompanionMode.Active);
+            Debug.Log("[RadialMenu] Mode: Active");
+            CloseMenu();
+        }
+
+        private void OnModeBeatDanceClick()
+        {
+            var cm = FindFirstObjectByType<CompanionManager>();
+            cm?.StartDance(Core.DanceStyle.Procedural);
+            Debug.Log("[RadialMenu] Mode: Beat Dance");
+            CloseMenu();
+        }
+
+        private void OnModeFullDanceClick()
+        {
+            var cm = FindFirstObjectByType<CompanionManager>();
+            cm?.StartDance(Core.DanceStyle.ShikanokoDance);
+            Debug.Log("[RadialMenu] Mode: Full Dance");
+            CloseMenu();
+        }
+
         private void OnSettingsClick() => OpenSettings();
 
         private void OnCharacterClick()
@@ -235,7 +273,16 @@ namespace Annabeth.UI
         private void OnSleepClick()
         {
             CloseMenu();
-            Debug.Log("[RadialMenu] Sleep toggle — not yet implemented (Phase 6).");
+            var sc = FindFirstObjectByType<Core.SleepController>();
+            if (sc != null)
+            {
+                sc.ToggleSleep();
+                Debug.Log($"[RadialMenu] Sleep toggle → {(sc.IsSleeping ? "sleeping" : "awake")}");
+            }
+            else
+            {
+                Debug.LogWarning("[RadialMenu] SleepController not found.");
+            }
         }
 
         private void OnClearHistoryClick()
@@ -255,6 +302,9 @@ namespace Annabeth.UI
 #if UNITY_EDITOR
             UnityEditor.EditorApplication.isPlaying = false;
 #else
+            // Bypass SystemTrayController's wantsToQuit handler that
+            // intercepts Application.Quit() and hides the avatar instead.
+            Core.SystemTrayController.forceQuit = true;
             Application.Quit();
 #endif
         }

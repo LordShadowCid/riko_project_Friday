@@ -26,6 +26,12 @@ class CompanionState:
     _silenced: bool = False
     _speaking: bool = False
     _emotion: Emotion = Emotion.NEUTRAL
+
+    # Browser selection context (text highlighted in browser extension)
+    _browser_selected_text: str = ""
+
+    # Shutdown flag — set by frontend (Unity) when it closes
+    shutdown_requested: bool = False
     
     # Callbacks for state change notifications
     _on_mode_change: Optional[Callable[[CompanionMode], None]] = field(default=None, repr=False)
@@ -133,6 +139,25 @@ class CompanionState:
         """Set callback for silence changes."""
         with self._lock:
             self._on_silence_change = callback
+
+    @property
+    def browser_selected_text(self) -> str:
+        with self._lock:
+            return self._browser_selected_text
+
+    @browser_selected_text.setter
+    def browser_selected_text(self, value: str) -> None:
+        with self._lock:
+            self._browser_selected_text = value
+        if value:
+            print(f"[State] Browser selection stored ({len(value)} chars)")
+
+    def take_browser_selected_text(self) -> str:
+        """Return stored browser selection and clear it (one-shot consume)."""
+        with self._lock:
+            text = self._browser_selected_text
+            self._browser_selected_text = ""
+            return text
 
 
 @dataclass
