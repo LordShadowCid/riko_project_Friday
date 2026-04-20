@@ -163,6 +163,48 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
                             filter_apps=data.get('filter_apps')
                         )
 
+                elif msg_type == MessageType.SWITCH_VOICE.value:
+                    # Switch RVC voice model at runtime
+                    voice_name = data.get('voice', '').strip()
+                    if voice_name:
+                        try:
+                            from server.process.tts_func.rvc_convert import switch_voice
+                            result = switch_voice(voice_name)
+                            await ws.send_json({
+                                "type": "voice_changed",
+                                "ok": result["ok"],
+                                "voice": result["voice"],
+                                "error": result.get("error"),
+                            })
+                            if result["ok"]:
+                                print(f"[Avatar] Voice switched to: {result['voice']}")
+                            else:
+                                print(f"[Avatar] Voice switch failed: {result.get('error')}")
+                        except Exception as e:
+                            await ws.send_json({
+                                "type": "voice_changed",
+                                "ok": False,
+                                "voice": "",
+                                "error": str(e),
+                            })
+                            print(f"[Avatar] Voice switch error: {e}")
+
+                elif msg_type == MessageType.LIST_VOICES.value:
+                    # Return available RVC voice models
+                    try:
+                        from server.process.tts_func.rvc_convert import list_voices
+                        voices = list_voices()
+                        await ws.send_json({
+                            "type": "voice_list",
+                            "voices": voices,
+                        })
+                    except Exception as e:
+                        await ws.send_json({
+                            "type": "voice_list",
+                            "voices": [],
+                            "error": str(e),
+                        })
+
                 elif msg_type == 'selected_text':
                     # Browser extension: user highlighted text in browser
                     text = data.get('text', '').strip()

@@ -137,7 +137,7 @@ def init_registry() -> None:
         VarDef(
             "GRILLO_DREAM_ENABLED",
             "Grillo Dream Mode",
-            False, bool,
+            True, bool,
             "When True, Grillo runs extra beats during system idle / sleep.",
         ),
         VarDef(
@@ -149,7 +149,7 @@ def init_registry() -> None:
         VarDef(
             "GRILLO_OBSERVER_ENABLED",
             "Grillo Observer Enabled",
-            False, bool,
+            True, bool,
             "Grillo observes screen/window titles for context hints.",
         ),
         VarDef(

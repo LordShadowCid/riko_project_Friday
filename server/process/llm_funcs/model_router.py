@@ -2,16 +2,16 @@
 LLM Model Auto-Router
 
 Selects the best Ollama model per intent category:
-  - greeting / question_short  → fast_model  (e.g. gemma3:4b)
-  - story / detailed / general → primary_model (e.g. llama3.1-8b)
+  - greeting / question_short  → fast_model  (e.g. qwen3:4b)
+  - story / detailed / general → primary_model (e.g. qwen3:8b)
   - command / followup         → primary_model
 
 Reads config from character_config.yaml:
 
     model_routing:
       enabled: true
-      primary_model: mannix/llama3.1-8b-abliterated
-      fast_model: gemma3:4b
+      primary_model: qwen3:8b
+      fast_model: qwen3:4b
 
 If a requested model is not available in Ollama, falls back to primary_model
 so startup never crashes.
@@ -27,7 +27,7 @@ from typing import Optional
 # Fast-intent categories (use the smaller/faster model)
 # ---------------------------------------------------------------------------
 
-_FAST_INTENTS = {"greeting", "question_short", "math", "factual", "opinion", "command"}
+_FAST_INTENTS = {"greeting", "question_short", "math", "factual"}
 
 
 class ModelRouter:

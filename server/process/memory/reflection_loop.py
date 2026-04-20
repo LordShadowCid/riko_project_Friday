@@ -8,6 +8,7 @@ Inspired by: XargonWan/Synthetic_Heart/develop/plugins/grillo/
 """
 import queue
 import random
+import re
 import sqlite3
 import threading
 import time
@@ -335,7 +336,21 @@ class ReflectionLoop:
         idle_secs = time.time() - self._last_activity_time  # noqa: SIM117
         if idle_secs >= PROACTIVE_IDLE_SECONDS and not _conversation_active:
             try:
-                thought = self._query_llm(PROACTIVE_PROMPT, history, max_tokens=40)
+                # Inject screen context if observer is running
+                proactive_p = PROACTIVE_PROMPT
+                try:
+                    from server.process.memory.screen_observer import get_screen_context
+                    ctx = get_screen_context()
+                    if ctx:
+                        proactive_p = (
+                            f"You are Annabeth. You've been quiet for a while. "
+                            f"Context: {ctx}. Say something relevant — a comment, "
+                            f"a question, or a playful remark about what they're doing. "
+                            f"One short sentence, max 20 words."
+                        )
+                except ImportError:
+                    pass
+                thought = self._query_llm(proactive_p, history, max_tokens=40)
                 if thought and not _proactive_queue.full():
                     _proactive_queue.put_nowait(thought)
                     print(f"[Reflection] Proactive thought queued: {thought}")
@@ -360,6 +375,7 @@ class ReflectionLoop:
             "model": settings["model"],
             "messages": messages,
             "stream": False,
+            "think": False,  # Qwen3: disable thinking — stripped anyway
             "keep_alive": settings["keep_alive"],
             "options": {
                 "num_ctx": min(settings["num_ctx"], 1024),
@@ -369,7 +385,10 @@ class ReflectionLoop:
         try:
             r = requests.post(f"{settings['host']}/api/chat", json=payload, timeout=30)
             r.raise_for_status()
-            return (r.json().get("message") or {}).get("content", "").strip()
+            text = (r.json().get("message") or {}).get("content", "").strip()
+            # Strip Qwen3 thinking blocks
+            text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+            return text
         except Exception as e:
             print(f"[Reflection] LLM query failed: {e}")
             return ""

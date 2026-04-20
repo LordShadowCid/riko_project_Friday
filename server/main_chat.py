@@ -740,6 +740,16 @@ try:
 except Exception as _e:
     print(f"[EmotionState] Failed to start decay loop (non-fatal): {_e}")
 
+# Start screen observer (Grillo Observer) for context-aware reflections
+try:
+    from server.settings_registry import registry as _sr
+    if _sr.get("GRILLO_OBSERVER_ENABLED"):
+        from server.process.memory.screen_observer import start_observer as _start_screen_obs
+        _obs_interval = int(_sr.get("GRILLO_OBSERVER_INTERVAL")) if int(_sr.get("GRILLO_OBSERVER_INTERVAL")) < 120 else 30
+        _start_screen_obs(interval=_obs_interval)
+except Exception as _e:
+    print(f"[ScreenObserver] Failed to start (non-fatal): {_e}")
+
 # Start self-improvement scheduler (Phase 10)
 try:
     from server.process.self_improvement.scheduler import ImprovementScheduler, SchedulerConfig

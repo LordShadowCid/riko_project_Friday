@@ -1,6 +1,6 @@
 ############################################################
 #  ANNABETH DEEP TEST SUITE
-#  2026-04-18 03:49:24
+#  2026-04-19 18:33:36
 ############################################################
 
 ============================================================
@@ -9,20 +9,20 @@
   [PASS] character_config.yaml loads
   [PASS] Tools enabled in config
   [PASS] System prompt present — 1995 chars
-  [PASS] Ollama settings loaded — model=mannix/llama3.1-8b-abliterated, num_ctx=8192
+  [PASS] Ollama settings loaded — model=qwen3:8b, num_ctx=4096
 
 ============================================================
   TEST 2: Ollama Connectivity
 ============================================================
-  [PASS] Ollama reachable — 3 models loaded
-  [PASS] Model 'mannix/llama3.1-8b-abliterated' available
-  [PASS] Quick generation works — 0.5s, got 7 chars: 'TEST_OK'
+  [PASS] Ollama reachable — 5 models loaded
+  [PASS] Model 'qwen3:8b' available
+  [PASS] Quick generation works — 0.1s, got 7 chars: 'TEST_OK'
 
 ============================================================
   TEST 3: TTS (GPT-SoVITS) Connectivity
 ============================================================
   [PASS] TTS server reachable — status=404
-  [PASS] TTS synthesis works — 1.3s, 204844 bytes audio
+  [PASS] TTS synthesis works — 1.0s, 186924 bytes audio
 
 ============================================================
   TEST 4: Gibberish Detector
@@ -66,7 +66,7 @@
 ============================================================
   TEST 9: Tool Calling
 ============================================================
-  [PASS] Time tool works — [Current time] It's Saturday, April 18, 2026 at 03:49 AM.
+  [PASS] Time tool works — [Current time] It's Sunday, April 19, 2026 at 06:33 PM.
   [PASS] Remember tool works — [Memory stored] Remembered: Remember that my favorite color is blue
   [PASS] Recall tool works — [Retrieved memories]
 - Remember that my favorite color is blue
@@ -75,8 +75,8 @@
 ============================================================
   TEST 10: Memory Store (ChromaDB)
 ============================================================
-  [PASS] ChromaDB connected — conversations=312, facts=26
-  [PASS] add_conversation works — conv_1776505768269
+  [PASS] ChromaDB connected — conversations=380, facts=41
+  [PASS] add_conversation works — conv_1776645220855
   [PASS] recall_conversations works — User said: [Dad]: What type of GPU do you think would be bes
   [PASS] recall_all works — 3 results
 
@@ -84,22 +84,22 @@
   TEST 13: Self-Evaluation System
 ============================================================
   [PASS] self_eval module imports
-  [PASS] self_eval DB accessible — 357 evaluations stored
-  [PASS] Recent eval averages: help=2.9 char=4.8 len=3.0
+  [PASS] self_eval DB accessible — 378 evaluations stored
+  [PASS] Recent eval averages: help=2.8 char=4.8 len=3.0
 
 ============================================================
   TEST 14: Personality System
 ============================================================
-  [PASS] Personality loaded — {'verbosity': 4, 'snarkiness': 4, 'formality': 2}
-  [PASS]   verbosity=4 (valid range)
+  [PASS] Personality loaded — {'verbosity': 5, 'snarkiness': 4, 'formality': 2}
+  [PASS]   verbosity=5 (valid range)
   [PASS]   snarkiness=4 (valid range)
   [PASS]   formality=2 (valid range)
 
 ============================================================
   TEST 15: Streaming Infrastructure
 ============================================================
-  [PASS] Streaming yielded 1 sentences in 7.4s
-  [PASS] First sentence: 'Hello, I'm here to help!'
+  [PASS] Streaming yielded 1 sentences in 0.2s
+  [PASS] First sentence: 'Hello, how can I help?'
 
 ============================================================
   TEST 16: WebSocket Server
@@ -113,34 +113,34 @@
   This is the critical test for the repeat bug.
 
   --- Turn 1: "Hello Annabeth, how are you doing today?"
-  Response (3.6s): Hey there, master... *wink* How am I supposed to be after dealing with all those boring tasks yesterday? Just kidding so...
+  Response (3.7s): Oh, hi there, senpai! I'm doing great, just finishing up some training with the demigods. [em_smile:0.8] {happy 6.5, rel...
 
   --- Turn 2: "What is your favorite kind of food?"
-  Response (3.0s): Ugh, don't get too excited here, but... Master Senpai still thinks he can change my digital taste buds when clearly, no ...
+  Response (17.5s): Hmm, senpai, I'm not sure if I should say this... but I've been secretly loving your coffee lately. [em_blush:0.7] {arou...
 
   --- Turn 3: "Can you say the word watermelon for me?"
-  Response (27.1s): *sigh* Fine, boss... WAA-tah-meh-luhn There now?! Watermelon isn't going anywhere, and neither will its ridiculous name....
+  Response (17.2s): Watermelon... [em_grin:0.6] {snarky 7.0, playful 5.5}...
 
   --- Turn 4: "What do you think about space exploration?"
-  Response (23.4s): Seriously, senpai? We’ve been over this like, a million times. It’s…fine. I mean, the idea of expanding beyond this litt...
+  Response (6.0s): ...
 
   --- Turn 5: "If you could have any superpower, what would it be?"
-  Response (2.1s): Seriously? That’s the question *again*? Ugh, don’t even bother asking me— it’s so predictable. Obviously, it’d be instan...
+  Response (8.1s): ...
 
   --- Turn 6: "Tell me a fun fact about dolphins."
-  Response (2.0s): Ugh, seriously? You *still* want to hear about dolphins? Like, we’ve already established that I’m not exactly thrilled w...
+  Response (5.1s): ...
 
   --- Turn 7: "What would you name a pet cat?"
-  Response (2.4s): Seriously? We’re *still* on this? Ugh, like, don’t even get me started – it’s a cat! It’s going to be a fluffy, purring ...
+  Response (6.7s): ...
 
   --- Turn 8: "What is two plus two?"
-  Response (1.7s): Seriously, senpai? You’re testing me? We just established I’m not built for basic arithmetic— remember the square root o...
+  Response (3.1s): ...
 
   --- Uniqueness Summary ---
   [PASS] All 8 responses unique — No repeats detected!
   [PASS] No gibberish detected in any response
-  [PASS] Average LLM response time: 8.2s
-  [PASS] Response opener variety: 8/8 unique prefixes
+  [PASS] Average LLM response time: 8.4s
+  [PASS] Response opener variety: 3/3 unique prefixes
 
 ============================================================
   TEST 12: History File Integrity
@@ -148,7 +148,7 @@
   [PASS] History loaded — 17 messages
   [PASS] System prompt is first message
   [PASS] No consecutive user messages (proper alternation)
-  [PASS] No duplicate assistant responses in history
+  [PASS] No duplicate assistant responses in recent history
 
 ============================================================
   FINAL SUMMARY

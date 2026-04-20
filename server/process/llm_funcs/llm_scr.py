@@ -730,6 +730,7 @@ def get_annabeth_response(messages):
         "model": settings["model"],
         "messages": _messages_to_role_content(messages),
         "stream": False,
+        "think": False,  # Qwen3: disable thinking — saves time, stripped anyway
         "keep_alive": settings["keep_alive"],
         "options": {
             "num_ctx": settings["num_ctx"],
@@ -792,6 +793,12 @@ def stream_ollama_response(messages, temp_boost: float = 0.0, num_predict: int =
     if temp_boost > 0:
         options["temperature"] = 0.7 + temp_boost  # Default ~0.7, boost from there
     
+    # Qwen3 ≥8B handles think:false well (fast, clean output).
+    # Smaller Qwen3 models (4b) leak reasoning into content with think:false,
+    # so let them think with tags — the streaming code strips <think> blocks.
+    _disable_think = ("qwen3" in active_model.lower() and
+                      not any(sz in active_model for sz in ("1b", "4b", "0.6b")))
+    
     chat_payload = {
         "model": active_model,
         "messages": _messages_to_role_content(messages),
@@ -799,9 +806,13 @@ def stream_ollama_response(messages, temp_boost: float = 0.0, num_predict: int =
         "keep_alive": settings["keep_alive"],
         "options": options,
     }
+    if _disable_think:
+        chat_payload["think"] = False
     
     full_response = ""
     buffer = ""
+    _in_thinking = False  # Qwen3 thinking mode: suppress <think>...</think> from TTS
+    _think_buffer = ""    # Accumulate partial tags across token boundaries
     # Pattern to split on sentence endings
     # Primary: sentence endings. Secondary: mid-sentence breaks for long buffers.
     sentence_pattern = re.compile(r'([.!?]+[\s\n]+|[\n]+)')
@@ -828,8 +839,44 @@ def stream_ollama_response(messages, temp_boost: float = 0.0, num_predict: int =
                 
                 content = (data.get("message") or {}).get("content", "")
                 if content:
-                    buffer += content
                     full_response += content
+
+                    # --- Qwen3 thinking-mode filter ---
+                    # Strip <think>...</think> blocks so they don't reach TTS.
+                    _think_buffer += content
+                    filtered = ""
+                    while _think_buffer:
+                        if _in_thinking:
+                            end = _think_buffer.find("</think>")
+                            if end == -1:
+                                # Still inside thinking — check for partial closing tag
+                                if _think_buffer.endswith("<") or _think_buffer.endswith("</") or _think_buffer.endswith("</t") or _think_buffer.endswith("</th") or _think_buffer.endswith("</thi") or _think_buffer.endswith("</thin") or _think_buffer.endswith("</think"):
+                                    break  # Wait for more tokens
+                                _think_buffer = ""
+                                break
+                            else:
+                                _in_thinking = False
+                                _think_buffer = _think_buffer[end + len("</think>"):]
+                        else:
+                            start = _think_buffer.find("<think>")
+                            if start == -1:
+                                # Check for partial opening tag at the end
+                                for plen in range(1, min(len("<think>"), len(_think_buffer) + 1)):
+                                    if _think_buffer.endswith("<think>"[:plen]):
+                                        filtered += _think_buffer[:-plen]
+                                        _think_buffer = _think_buffer[-plen:]
+                                        break
+                                else:
+                                    filtered += _think_buffer
+                                    _think_buffer = ""
+                                break
+                            else:
+                                filtered += _think_buffer[:start]
+                                _in_thinking = True
+                                _think_buffer = _think_buffer[start + len("<think>"):]
+
+                    if filtered:
+                        buffer += filtered
                     
                     # Check if we have complete sentences to yield
                     parts = sentence_pattern.split(buffer)

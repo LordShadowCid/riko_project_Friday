@@ -1,15 +1,13 @@
 # Ollama configuration (local LLM)
 ollama:
   host: http://127.0.0.1:11434
-  # Uncensored models (recommended for roleplay):
-  #   mannix/llama3.1-8b-abliterated - Llama 3.1 with censorship removed (abliterated) [CURRENT]
-  #   dolphin3:8b - Dolphin 3.0, designed to be uncensored/steerable (available locally)
-  # Lightweight/fast:
-  #   gemma3:4b - Google Gemma 3 4B, very fast, good quality for size (available locally)
-  # Standard models:
-  #   qwen3:14b - Smartest but slowest (wait for RAM+1 / 96GB)
-  #   llama3.1:8b - Fast but censored
-  model: mannix/llama3.1-8b-abliterated
+  # Models available locally:
+  #   qwen3:8b - Qwen 3 8B, native tool calling + thinking mode, excellent roleplay [CURRENT]
+  #   qwen3:4b - Qwen 3 4B, fast model, rivals 72B-class performance [FAST]
+  #   mannix/llama3.1-8b-abliterated - Llama 3.1 uncensored (legacy)
+  #   dolphin3:8b - Dolphin 3.0, uncensored/steerable (legacy)
+  #   gemma3:4b - Google Gemma 3 4B (legacy fast)
+  model: qwen3:8b
   # Keep model loaded in memory for faster responses (-1 = never unload)
   keep_alive: -1
   # Enable streaming for faster first response
@@ -35,28 +33,46 @@ tools:
 model_routing:
   enabled: true
   # Primary model for complex/long responses
-  primary_model: mannix/llama3.1-8b-abliterated
+  primary_model: qwen3:8b
   # Fast model for greetings, quick questions (must be pulled in Ollama)
-  fast_model: gemma3:4b
+  fast_model: qwen3:4b
 
 # RVC (Retrieval-based Voice Conversion) — post-processes GPT-SoVITS output
 # Set enabled: true and place your .pth model in model_dir to activate
 rvc:
-  enabled: false
+  enabled: true
   model_dir: character_files/rvc_models
   model_name: annabeth.pth
   pitch_shift: 0          # semitones, negative = lower pitch
   f0_method: harvest      # options: harvest, crepe, parselmouth
+  # Available voice models (auto-detected from model_dir, but you can list extras)
+  voices:
+    annabeth:
+      label: "Annabeth (default)"
+      pth: annabeth.pth
+    haruka:
+      label: "Haruka (anime kawaii)"
+      pth: haruka.pth
+    hikari:
+      label: "Hikari (soft)"
+      pth: hikari.pth
+    sally:
+      label: "Sally (English female)"
+      pth: sally.pth
+    marie_rose:
+      label: "Marie Rose (Dead or Alive)"
+      pth: marie_rose.pth
+      pth: sally.pth
 
 # Self-improvement — AST-based code analysis and proposal system
 # Proposals are written to C:\annabeth_data\proposals.json for human review
 # auto_apply_risk: none (never auto-apply), low (apply only low-severity)
 self_improvement:
-  enabled: false
+  enabled: true
   auto_apply_risk: none   # none | low
 
 history_file: chat_history.json
-model: "mannix/llama3.1-8b-abliterated"
+model: "qwen3:8b"
 # 20 turns with 8192 ctx — larger context allows more conversation memory
 max_history_turns: 20
 
@@ -69,8 +85,8 @@ audio:
 
 whisper:
   # Common choices: base.en, small.en, medium.en, large-v3, turbo
-  # small.en gives much better accuracy than base.en; GPU 1 has 16GB — plenty of room
-  model: small.en
+  # large-v3 gives best accuracy; GPU 1 has 16GB — plenty of room (~4.5GB VRAM)
+  model: large-v3
   # cpu or cuda
   device: cuda
   # Which GPU to use (0=RTX A4000, 1=Quadro RTX 4000)

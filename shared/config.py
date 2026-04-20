@@ -30,6 +30,8 @@ class MessageType(str, Enum):
     SET_SILENCE = "set_silence"
     READ_PAUSE = "read_pause"      # Q key - pause read-aloud to ask question
     READ_RESUME = "read_resume"    # R key - resume read-aloud
+    SWITCH_VOICE = "switch_voice"  # Change RVC voice model at runtime
+    LIST_VOICES = "list_voices"    # Request available voice list
     SHUTDOWN = "shutdown"           # Unity closing - tell backend to exit
     
     # Server -> Client
